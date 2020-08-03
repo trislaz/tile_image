@@ -1,17 +1,67 @@
 #!/usr/bin/env nextflow
 
-glob_wsi = '/mnt/data4/tlazard/data/curie/curie_recolo_raw/*.ndpi' // insert glob pattern at the end (*.tiff for instance)
-root_out = '/mnt/data4/tlazard/data/curie/curie_recolo_tiled'
-path_mask = '/mnt/data4/tlazard/data/curie/curie_recolo_annot/auto'
-level = 1 
-mask_level = -1
+// Nb : ne jamais finir un path par / dans les paramètres d'entrée.
+
+// Ne modifier que les paramètres de ce préambule
+
+// ------------------------------------------------------------------------------
+
+ext = "ndpi"
+input_path = "/mnt/data4/tlazard/data/curie/curie_recolo_raw"
+output_path = "/mnt/data4/tlazard/data/curie/curie_recolo_tiled"
+level_mask = -1
+level_sampling = 1
 size = 256 
+tiler = 'imagenet'  // dispo : simple | imagenet
+
+// ------------------------------------------------------------------------------ 
+
+input_wsi = Channel.fromPath(input_path + "/*.${ext}", type: 'file')
+
+process Downsample{
+    publishDir "${output_path}/down", overwrite: true, mode: 'copy'
+
+    input:
+    val image from input_wsi
+
+    output:
+    file('*.jpg') into downsampled
+
+    script:
+    python_script = file("./downsize.py")
+    """
+    python ${python_script} --path ${image} --level ${level_mask}
+    echo ${level_mask} > level_down.txt
+    """
+}
+
+downsampled .map{ file -> tuple(file.baseName, file)}
+
+process CreateMasks {
+    publishDir "${output_path}/annot/auto_visu", pattern: "*_visu.jpg", overwrite: true, mode: 'copy'
+    publishDir "${output_path}/annot/auto", pattern: "*.npy", overwrite: true, mode: 'copy'
+
+    input:
+    tuple val(imageID), file(image) from downsampled
+
+    output:
+    tuple val(imageID), file("${imageID}.npy") into masks
+	file('*_visu.jpg')
+
+    script:
+    python_script = file('create_auto_mask.py')
+    """
+    python ${python_script} --image ${image}
+    """
+}
+
 auto_mask = 1
-tiler = 'imagenet' // dispo : simple | imagenet 
+glob_wsi = "${input_path}/*.${ext}"
+path_mask = "${output_path}/annot/auto"
 dataset = Channel.fromPath(glob_wsi)
 				 .map { file -> tuple(file.baseName, file) } 
 				 .into { dataset_1; dataset_2}
-root_outputs = file("${root_out}/${tiler}/size_${size}/res_${level}/")
+root_outputs = file("${root_out}/${tiler}/size_${size}/res_${level_sampling}/")
 
 process Tiling {
 	if (tiler == 'simple'){
@@ -43,11 +93,11 @@ process Tiling {
 	module load cuda10.0
 	python ${python_script} --path_wsi ${slidePath} \
 							--path_mask ${path_mask} \
-							--level $level \
+							--level $level_sampling \
 							--auto_mask ${auto_mask} \
 							--tiler ${tiler} \
 							--size $size \
-							--mask_level ${mask_level}
+							--mask_level ${level_mask}
 	"""
 }
 
