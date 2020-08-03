@@ -133,7 +133,10 @@ class ImageTiler:
         self.tiler = args.tiler
         self.name_wsi, self.ext_wsi = os.path.splitext(os.path.basename(self.path_wsi))
         self.slide = usi.open_image(self.path_wsi)
-        self.mask_level = self.slide.level_count - 2
+        if args.mask_level < 0:
+            self.mask_level = self.slide.level_count + args.mask_level
+        else:
+            self.mask_level = args.mask_level    
         self.rgb_img = usi.get_whole_image(self.slide, level=self.mask_level, numpy=True)
         self.mask_function = self._get_mask_function()
         self.mask_tolerance = 0.8
@@ -197,9 +200,9 @@ class ImageTiler:
             infodict[o] = {'x':para[0], 'y':para[1], 'xsize':self.size[0], 'ysize':self.size[0], 'level':para[4]} 
             infomat[para[0]//patch_size_0, para[1]//patch_size_0] = o 
         df = pd.DataFrame(infos)
-        df.to_csv(os.path.join(self.path_outputs, 'infos.csv'), index=False)
-        np.save(os.path.join(self.path_outputs, 'infomat.npy'), infomat-1)
-        with open(os.path.join(self.path_outputs, 'infodict.pickle'), 'wb') as f:
+        df.to_csv(os.path.join(self.path_outputs, self.name_wsi + '_infos.csv'), index=False)
+        np.save(os.path.join(self.path_outputs,self.name_wsi + '_infomat.npy'), infomat-1)
+        with open(os.path.join(self.path_outputs, self.name_wsi + '_infodict.pickle'), 'wb') as f:
             pickle.dump(infodict, f)
    
     def simple_tiler(self, param_tiles):

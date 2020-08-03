@@ -1,31 +1,35 @@
 #!/usr/bin/env nextflow
 
-glob_wsi = '' // insert glob pattern at the end (*.tiff for instance)
-path_mask = ''
+glob_wsi = '/mnt/data4/tlazard/data/curie/curie_recolo_raw/*.ndpi' // insert glob pattern at the end (*.tiff for instance)
+root_out = '/mnt/data4/tlazard/data/curie/curie_recolo_tiled'
+path_mask = '/mnt/data4/tlazard/data/curie/curie_recolo_annot/auto'
 level = 1 
+mask_level = -1
 size = 256 
-path_mask = "/mnt/data3/pnaylor/Data/Biopsy_Nature_3-0/tissue_segmentation/"
-auto_mask = 0
+auto_mask = 1
 tiler = 'imagenet' // dispo : simple | imagenet 
-python_script = "../scripts/main_tiling.py"
-dataset = Channel.fromPath(slides_folder)
-				 .map { file -> tuple(file.baseName, file) }
-root_outputs = file("/mnt/data4/tcga/tiled/${tiler}/size_${size}/res_${level}/")
+dataset = Channel.fromPath(glob_wsi)
+				 .map { file -> tuple(file.baseName, file) } 
+				 .into { dataset_1; dataset_2}
+root_outputs = file("${root_out}/${tiler}/size_${size}/res_${level}/")
 
 process Tiling {
-	publishDir "$root_outputs/${slideID}_info", overwrite: true, pattern: "*.pickle", mode: 'copy'
-	publishDir "$root_outputs/${slideID}_info", overwrite: true, pattern: "*.csv", mode: 'copy'
-	publishDir "$root_outputs/${slideID}_info", overwrite: true, pattern: "infomat.npy", mode: 'copy'  
+	if (tiler == 'simple'){
 	publishDir "$root_outputs/${slideID}", overwrite: true, pattern: "*.jpg", mode: 'copy'
+	}
 	publishDir "$root_outputs/visu/", overwrite: true, pattern: "*.png", mode: 'copy'
 	publishDir "$root_outputs/mat/", overwrite:true, pattern:"*_embedded.npy", mode: 'copy'
-	queue 'cpu'
-	stageInMode 'copy'
-	memory '10GB'
-	
+	publishDir "$root_outputs/info/", overwrite:true, pattern: "*_infomat.npy", mode: 'copy'
+	publishDir "$root_outputs/info/", overwrite:true, pattern: "*.pickle", mode: 'copy'
+	publishDir "$root_outputs/info/", overwrite:true, pattern: "*.csv", mode: 'copy'
+	queue "gpu-cbio"
+	maxForks 10
+    clusterOptions "--gres=gpu:1"
+    maxForks 16
+    memory '20GB'
+
 	input:
-	set slideID, file(slidePath) from dataset
-	each level from levels
+	set slideID, file(slidePath) from dataset_1
 
 	output:
 	val slideID into out
@@ -35,22 +39,27 @@ process Tiling {
 	file('*.png')
 
 	script:
+	python_script = file("../scripts/main_tiling.py")
 	"""
-	python ${python_script} --path ${slidePath} \
-							--xml $xml_folder \
+	module load cuda10.0
+	python ${python_script} --path_wsi ${slidePath} \
+							--path_mask ${path_mask} \
 							--level $level \
 							--auto_mask ${auto_mask} \
-							--size $size 
+							--tiler ${tiler} \
+							--size $size \
+							--mask_level ${mask_level}
 	"""
 }
 
 // Normaliser et PCAiser: à faire dans un autre script NF car cela va dépendre systematiquement du dataset à utiliser.
 // Exemple : si je veux utiliser le mélance de TCGA et Curie, il faudra que je normalise sur cet ensemble.
 
-//out .collect()
-//	.into{all_wsi_tiled_1, all_wsi_tiled_2}
+out .into{ out_1; out_2}
+out_1 .collect()
+	  .into{all_wsi_tiled_1; all_wsi_tiled_2}
 //
-//if (tiler != 'simple'){
+if (tiler != 'simple'){
 //	process ComputeGlobalMean {
 //		publishDir "${output_folder}", overwrite: true, mode: 'copy'
 //		memory { 10.GB }
@@ -69,25 +78,47 @@ process Tiling {
 //		python $compute_mean --path ${results_folder}
 //		"""
 //	}
-//
-//	process Incremental_PCA {
-//    publishDir "${output_folder}", overwrite: true, pattern: "*.txt" mode: 'copy'
-//    memory '60GB'
-//    cpus '16'
-//
-//    input:
-//    val _ from all_wsi_tiled_2
-//    
-//    output:
-//    file("*.joblib") into results_PCA
-//	file("*.txt")
-//
-//    script:
-//    output_folder = "${root_outputs}/pca/"
-//	mat_folder = "${root_outputs}/mat/"
-//    python_script = file("../scripts/pca_partial.py")
-//    """
-//    python $python_script --path ${mat_folder}
-//    """
-//	}
-//}
+
+	process Incremental_PCA {
+    publishDir "${output_folder}", overwrite: true, pattern: "*.txt", mode: 'copy'
+	publishDir "${output_folder}", overwrite:true, pattern: "*.joblib", mode: 'copy'
+    memory '60GB'
+    cpus '16'
+
+    input:
+    val _ from all_wsi_tiled_2
+    
+    output:
+    file("*.joblib") into results_PCA
+	file("*.txt")
+
+    script:
+    output_folder = "${root_outputs}/pca/"
+	mat_folder = "${root_outputs}/mat/"
+    python_script = file("../scripts/pca_partial.py")
+    """
+    python $python_script --path ${mat_folder}
+    """
+	}
+
+	input_transform = results_PCA . combine(out_2)
+
+	process Transform_Tiles {
+    publishDir "${output_folder}", overwrite: true, mode: 'copy'
+    memory '20GB'
+
+    input:
+    set file(pca), val(slideID) from input_transform
+
+    output:
+    file("*.npy") into transform_tiles
+
+    script:
+	output_folder = "${root_outputs}/mat_pca/"
+	path_encoded =  "$root_outputs/mat/${slideID}_embedded.npy"
+    python_script = file("../scripts/transform_tile.py")
+    """
+    python ${python_script} --path ${path_encoded} --pca $pca
+    """
+	}
+}

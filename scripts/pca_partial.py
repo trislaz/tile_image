@@ -34,11 +34,13 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--path", type = str, default=".", help="path to the files of tiles")
     args = parser.parse_args()
-    files = glob(os.path.join(args.path, "*_embedded.npy"))
+    files = glob(os.path.join(args.path, "*.npy"))
     ipca = IncrementalPCA()
     batch = []
     for path in tqdm(files):
         mat = np.load(path)
+        if mat.sum() == 0:
+            continue
         if check_dim(batch):
             batch = np.concatenate(batch, axis=0)
             ipca.partial_fit(X=batch)

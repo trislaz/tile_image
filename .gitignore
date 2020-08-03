@@ -1,0 +1,3 @@
+nextflow/.nextflow*
+nextflow/work/
+tiler_wsi_trela.egg-info

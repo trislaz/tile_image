@@ -22,8 +22,11 @@ def transform_pca(dataset, pca):
     np.array
         NxD', N samples, D' features = number of components of the PCA. = D.
     """
-    data_transformed = np.matmul(dataset, pca.components_.transpose())
-    data_transformed = data_transformed - pca.mean_
+    if dataset.sum() != 0:
+        data_transformed = np.matmul(dataset, pca.components_.transpose())
+        data_transformed = data_transformed - pca.mean_
+    else:
+        data_transformed = dataset
     return data_transformed
 
 if __name__=="__main__":
