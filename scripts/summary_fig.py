@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 import os
+import matplotlib.pyplot as plt
 from tiler_wsi.tile_retriever.tile_sampler import MILHeatmat
 
 def main(model_path, wsi_ID, embed_path, raw_path, ext_wsi, out_path):
@@ -7,6 +8,8 @@ def main(model_path, wsi_ID, embed_path, raw_path, ext_wsi, out_path):
     mhm.get_images(wsi_ID=wsi_ID, embeddings=embed_path, raw=raw_path)
     fig = mhm.get_summary_fig()
     fig.savefig(os.path.join(out_path, wsi_ID+'_summary.jpg'), bbox_inches='tight')
+    plt.close(fig)
+    
 
 
 if __name__ == '__main__':

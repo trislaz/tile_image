@@ -65,17 +65,17 @@ class MILHeatmat:
         with open(os.path.join(wsi_info_path, wsi_ID+ '_infodict.pickle'), "rb") as f:
             infodict = pickle.load(f)
         #forward
-        input_wsi = self.preprocess(wsi_embedded_path)
+        input_wsi = self._preprocess(wsi_embedded_path)
         _ = self.model.predict(input_wsi)
         # transform hooks to infomat.
         # Fills the images dict
-        heatmap = self.transfer_to_infomat(infomat)
-        wsi_down = self.get_down_image(self.wsi_raw_path)
-        self.set_best_tiles(self.wsi_raw_path, heatmap, self.k, infomat, infodict)
+        heatmap = self._transfer_to_infomat(infomat)
+        wsi_down = self._get_down_image(self.wsi_raw_path)
+        self._set_best_tiles(self.wsi_raw_path, heatmap, self.k, infomat, infodict)
         self.images['heatmap'] = heatmap
         self.images['wsi_down'] = wsi_down
 
-    def plot_loc_tile(self, ax, color, para):
+    def _plot_loc_tile(self, ax, color, para):
         args_patch = {'color':color, 'fill': False, 'lw': 5}
         top_left_x, top_left_y = usi.get_x_y_from_0(self.wsi, (para['x'], para['y']), self.level_visu)
         width, height = usi.get_size(self.wsi, (para['xsize'], para['ysize']), para['level'], self.level_visu)
@@ -84,7 +84,7 @@ class MILHeatmat:
         ax.add_patch(patch)
         return ax
 
-    def set_best_tiles(self, wsi_raw_path, heatmap, k, infomat, infodict):
+    def _set_best_tiles(self, wsi_raw_path, heatmap, k, infomat, infodict):
         mask = infomat > 0
         mask = mask.flatten()
         heatmap = heatmap.flatten()[mask]
@@ -99,8 +99,27 @@ class MILHeatmat:
         self.scores['lowk'] = heatmap[lowk]
         self.params['topk'] = [infodict[i] for i in topk_i]
         self.params['lowk'] = [infodict[i] for i in lowk_i]
-        self.images['topk'] = [usi.get_image(wsi_raw_path, infodict[i], numpy=True) for i in topk_i]
-        self.images['lowk'] = [usi.get_image(wsi_raw_path, infodict[i], numpy=True) for i in lowk_i]
+        self.images['topk'] = [usi.get_image(wsi_raw_path, self._infodict_to_list(infodict[i]), numpy=True) for i in topk_i]
+        self.images['lowk'] = [usi.get_image(wsi_raw_path, self._infodict_to_list(infodict[i]), numpy=True) for i in lowk_i]
+
+    @staticmethod
+    def _infodict_to_list(dictio):
+        """Interface to use ùseful_wsi`that needs a list for parameter
+        Because this is how have been implemented the tiling by peter
+
+        Args:
+            dictio (dict): my parameter dict (x, y, xsize, ysize, level)
+
+        Returns:
+            list: list of parameters, in the good order.
+        """
+        para = []
+        para.append(dictio['x'])
+        para.append(dictio['y'])
+        para.append(dictio['xsize'])
+        para.append(dictio['ysize'])
+        para.append(dictio['level'])
+        return para
     
     def get_summary_fig(self):
         color_tile = {0:'red', 1:'blue'}
@@ -126,7 +145,7 @@ class MILHeatmat:
                 ax = set_axes_color(ax, color=color_tile[l]) 
                 ax.set_title('score: {}'.format(self.scores[ref_l[l]][c]))
                 tiles.append(ax)
-                visu = self.plot_loc_tile(visu, color=color_tile[l], para=self.params[ref_l[l]][c])
+                visu = self._plot_loc_tile(visu, color=color_tile[l], para=self.params[ref_l[l]][c])
         visu.legend(handles=legend_elements, loc='upper right', fontsize=12, handlelength=2)
         fig.tight_layout()
         return fig
@@ -136,7 +155,7 @@ class MILHeatmat:
         fig, _ = self.compute_heatmap(wsi_ID, embeddings, raw)
         fig.savefig(out_path)
 
-    def transfer_to_infomat(self, infomat):
+    def _transfer_to_infomat(self, infomat):
         """transfers the weights hooked on to the infomat.
 
         Args:
@@ -190,8 +209,7 @@ class MILHeatmat:
                     print('Hook in place, captain')
         get_all_layers(self.model.network)
 
-
-    def preprocess(self, input_path):
+    def _preprocess(self, input_path):
         """preprocess the input to feed the model
 
         Args:
@@ -204,7 +222,7 @@ class MILHeatmat:
         inp = inp.to(self.model.device)
         return inp
 
-    def get_down_image(self, wsi):
+    def _get_down_image(self, wsi):
         """get the downsampled image (numpy format) at the desired downsampling factor.
         """
         self.wsi = usi.open_image(wsi)

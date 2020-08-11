@@ -8,7 +8,7 @@ parser.add_argument('--table', type=str, help='path to the table with the ID of 
 parser.add_argument('--model_path', type=str, help='path to the model used for prediction')
 parser.add_argument('--embed_path', type=str, help='path to the embeddings')
 parser.add_argument('--raw_path', type=str, help='path to the raw images (ndpi, svs... )')
-parser.add_argument('--out', type=str, help='name of the folder where storing the outputs', defautl='summaries')
+parser.add_argument('--out', type=str, help='name of the folder where storing the outputs', default='summaries')
 parser.add_argument('--ext_wsi', type=str, help='extension of the WSIs', default='ndpi')
 args = parser.parse_args()
 
