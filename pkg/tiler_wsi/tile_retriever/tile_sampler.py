@@ -169,7 +169,7 @@ class MILHeatmat:
         visu.imshow(self.images['wsi_down'])
         visu.set_axis_off()
         heatmap = plt.subplot2grid(gridsize, (2, 2), rowspan=2, colspan=2, fig=fig)
-        hm = heatmap.imshow(self.images['heatmap'], cmap='coolwarm')
+        hm = heatmap.imshow(self.images['heatmap'], cmap='coolwarm', vmin=self.scores['lowk'][0])
         fig.colorbar(hm, ax=heatmap)
         heatmap.set_axis_off()
         tiles = []
@@ -191,7 +191,7 @@ class MILHeatmat:
         if self.result_pred is '':
             msg = "Prediction of {} : {}.".format(self.target_name, self.pred)
         else:
-            msg = "Prediction of {} : {}. Ground truth: {}".format(self.target_name, self.pred, self.result_pred)
+            msg = "Prediction of {} : {}. Ground truth: {}".format(self.target_name, self.pred, self.gt)
         return msg
 
     def compute_and_save(self, wsi_ID, embeddings, raw):
@@ -246,10 +246,11 @@ class MILHeatmat:
 
         def get_all_layers(net):
             for name, layer in net.named_children():
-                if layer.children():
+                if list(layer.children()):
                     get_all_layers(layer)
                 if name == 'weight_extractor':
-                    layer.register_forward_hook(hook_tiles)
+                    hook_layer = list(layer.children())[2]
+                    hook_layer.register_forward_hook(hook_tiles)
                     print('Hook in place, captain')
         get_all_layers(self.model.network)
 
@@ -310,7 +311,7 @@ class TileSampler:
         tile_indices = np.random.choice(rotated_infomat[sample], nb_tiles)
         return tile_indices
     
-#if __name__ == "__main__":
+if __name__ == "__main__":
 
 #%%
     model = '/Users/trislaz/Documents/cbio/projets/tile_image/data_test/model.pt.tar'
