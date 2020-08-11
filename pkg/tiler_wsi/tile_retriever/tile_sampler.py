@@ -8,11 +8,21 @@ import matplotlib.patches as patches
 import torch
 from argparse import Namespace
 import matplotlib.pyplot as plt
+from glob import glob
 import yaml
 import useful_wsi as usi
 import numpy as np
 import pickle
+import pandas as pd
 import os 
+
+def add_titlebox(ax, text):
+    ax.text(.05, .05, text,
+        horizontalalignment='left',
+        transform=ax.transAxes,
+        bbox=dict(facecolor='white', alpha=0.8),
+        fontsize=25)
+    return ax
 
 def set_axes_color(ax, color='orange'):
     dirs = ['bottom', 'top', 'left', 'right']
@@ -31,13 +41,16 @@ def filename(path:str):
 ## For the moment, I have to transpose infomat to have the good representation.
 ## Change directly in the tiling process, then here
 class MILHeatmat:
-    def __init__(self, model, level_visu=-1, ext_wsi='ndpi', k=5):
+    def __init__(self, model, level_visu=-1, k=5):
         self.k = k
-        self.ext_wsi = ext_wsi
         self.model = load_model(model)
+        self.target_name = self.model.args.target_name
         self.level_visu = level_visu
         self.tiles_weights = None
         self._get_hook()
+        self.gt = None
+        self.pred = None
+        self.result_pred = ''
         self.infomat = None
         self.wsi_ID = None
         self.wsi_embedded_path = None
@@ -54,9 +67,21 @@ class MILHeatmat:
         self.params = {'topk':None, 
                         'lowk': None}
 
-    def get_images(self, wsi_ID, embeddings, raw):
+    def get_images(self, wsi_ID, embeddings, raw, table=None):
+        """Generates data from the prediction of a model and stores it in dict attributes.
+            * self.images with keys heatmap | topk | lowk | wsi_down (all in npy format)
+            * self.scores with keys topk | lowk are the scores of the topk tiles and worst k tiles
+            * self.params with keys topk | lowk are the params of the top and worst tiles (in the 0 level) 
+
+        Args:
+            wsi_ID (str): name of the image on which to use the model. WSI and embeddings must be named after it.
+            embeddings (str): out path of a tile-image process; where are stored the embeddings and their info.
+            raw (str): path of the raw WSI images.
+            table (str, optional): Either a path to a table data. If no, then no info on the label is available.
+                Defaults to 'no'.
+        """
         self.wsi_ID = wsi_ID
-        self.wsi_raw_path = os.path.join(raw, wsi_ID + ".{}".format(self.ext_wsi)) # implemented only for npy embedings.
+        self.wsi_raw_path = glob(os.path.join(raw, wsi_ID + ".*"))[0] # implemented only for npy embedings.
         wsi_embedded_path = os.path.join(embeddings, 'mat_pca', wsi_ID + "_embedded.npy")
         wsi_info_path = os.path.join(embeddings, 'info')
         infomat = os.path.join(wsi_info_path, wsi_ID + '_infomat.npy')
@@ -66,7 +91,7 @@ class MILHeatmat:
             infodict = pickle.load(f)
         #forward
         input_wsi = self._preprocess(wsi_embedded_path)
-        _ = self.model.predict(input_wsi)
+        _, pred = self.model.predict(input_wsi)
         # transform hooks to infomat.
         # Fills the images dict
         heatmap = self._transfer_to_infomat(infomat)
@@ -75,6 +100,17 @@ class MILHeatmat:
         self.images['heatmap'] = heatmap
         self.images['wsi_down'] = wsi_down
 
+        self.pred = self.model.args.target_correspondance[int(pred)]
+        if table is not None:
+            self.gt = self._extract_groundtruth(table, wsi_ID)
+            self.result_pred = 'success' if self.gt == self.pred else 'failure'
+
+    def _extract_groundtruth(self, table, wsi_ID):
+        if isinstance(table, str):
+            table = pd.read_csv(table)
+        gt = table[table['ID'] == wsi_ID][self.target_name].values[0]
+        return gt
+        
     def _plot_loc_tile(self, ax, color, para):
         args_patch = {'color':color, 'fill': False, 'lw': 5}
         top_left_x, top_left_y = usi.get_x_y_from_0(self.wsi, (para['x'], para['y']), self.level_visu)
@@ -147,8 +183,16 @@ class MILHeatmat:
                 tiles.append(ax)
                 visu = self._plot_loc_tile(visu, color=color_tile[l], para=self.params[ref_l[l]][c])
         visu.legend(handles=legend_elements, loc='upper right', fontsize=12, handlelength=2)
+        add_titlebox(visu, self._make_message())
         fig.tight_layout()
         return fig
+
+    def _make_message(self):
+        if self.result_pred is '':
+            msg = "Prediction of {} : {}.".format(self.target_name, self.pred)
+        else:
+            msg = "Prediction of {} : {}. Ground truth: {}".format(self.target_name, self.pred, self.result_pred)
+        return msg
 
     def compute_and_save(self, wsi_ID, embeddings, raw):
         out_path = os.path.join(self.out_path, wsi_ID + '_heatmap.jpg')
@@ -266,7 +310,7 @@ class TileSampler:
         tile_indices = np.random.choice(rotated_infomat[sample], nb_tiles)
         return tile_indices
     
-if __name__ == "__main__":
+#if __name__ == "__main__":
 
 #%%
     model = '/Users/trislaz/Documents/cbio/projets/tile_image/data_test/model.pt.tar'
@@ -277,6 +321,5 @@ if __name__ == "__main__":
     hm.get_images(wsi_ID, embeddings, raw)
     fig = hm.get_summary_fig()
 
-plt.Axes.set_axis_off
 
 # %%
