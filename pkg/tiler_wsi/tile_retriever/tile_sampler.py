@@ -87,7 +87,7 @@ class MILHeatmat:
         infomat = os.path.join(wsi_info_path, wsi_ID + '_infomat.npy')
         infomat = np.load(infomat)
         infomat = infomat.T # TODO A enlever plus tard
-        with open(os.path.join(wsi_info_path, wsi_ID+ '_infodict.pickle'), "r") as f:
+        with open(os.path.join(wsi_info_path, wsi_ID+ '_infodict.pickle'), "rb") as f:
             infodict = pickle.load(f)
         #forward
         input_wsi = self._preprocess(wsi_embedded_path)
