@@ -9,7 +9,7 @@ def main(model_path, wsi_ID, embed_path, raw_path, out, table, store_best=True):
     fig = mhm.get_summary_fig()
     out_summary = os.path.join('.', out, 'summaries')
     os.makedirs(out_summary, exist_ok=True)
-    out_summary = os.path.join(out_summary, mhm.result_pred+wsi_ID+'_summary.jpg')
+    out_summary = os.path.join(out_summary, mhm.result_pred+'_'+wsi_ID+'_summary.jpg')
     fig.savefig(out_summary, bbox_inches='tight')
     #Saving best tiles
     if mhm.result_pred == "success" and store_best:
