@@ -3,7 +3,7 @@ import os
 import matplotlib.pyplot as plt
 from tiler_wsi.tile_retriever.tile_sampler import MILHeatmat
 
-def main(model_path, wsi_ID, embed_path, raw_path, out, table):
+def main(model_path, wsi_ID, embed_path, raw_path, out, table, store_best):
     mhm = MILHeatmat(model_path)    
     mhm.get_images(wsi_ID=wsi_ID, embeddings=embed_path, raw=raw_path, table=table)
     fig = mhm.get_summary_fig()
