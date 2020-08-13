@@ -3,16 +3,26 @@ import os
 import matplotlib.pyplot as plt
 from tiler_wsi.tile_retriever.tile_sampler import MILHeatmat
 
-def main(model_path, wsi_ID, embed_path, raw_path, out, table, store_best):
+def main(model_path, wsi_ID, embed_path, raw_path, out, table, store_best=True):
     mhm = MILHeatmat(model_path)    
     mhm.get_images(wsi_ID=wsi_ID, embeddings=embed_path, raw=raw_path, table=table)
     fig = mhm.get_summary_fig()
-    out = os.path.join('.', out)
-    os.makedirs(out, exist_ok=True)
-    out_path = os.path.join(out, mhm.result_pred+wsi_ID+'_summary.jpg')
-    fig.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
-    
+    out_summary = os.path.join('.', out, 'summaries')
+    os.makedirs(out_summary, exist_ok=True)
+    out_summary = os.path.join(out_summary, mhm.result_pred+wsi_ID+'_summary.jpg')
+    fig.savefig(out_summary, bbox_inches='tight')
+    #Saving best tiles
+    if mhm.result_pred == "success" and store_best:
+        out_best = os.path.join('.', out, 'best_tiles')
+        os.makedirs(out_best, exist_ok=True)
+        best = mhm.images['topk'][-1]
+        _, ax = plt.subplots()
+        ax.imshow(best)
+        ax.set_axis_off()
+        plt.savefig(os.path.join(out_best, wsi_ID+'_best.jpg'))
+    plt.close('all')
+
+
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--model_path', type=str, help='path to the model used for prediction')
