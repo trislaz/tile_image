@@ -12,14 +12,14 @@ def main(model_path, wsi_ID, embed_path, raw_path, out, table, store_best=True):
     out_summary = os.path.join(out_summary, mhm.result_pred+'_'+wsi_ID+'_summary.jpg')
     fig.savefig(out_summary, bbox_inches='tight')
     #Saving best tiles
-    if mhm.result_pred == "success" and store_best:
+    if store_best:
         out_best = os.path.join('.', out, 'best_tiles')
         os.makedirs(out_best, exist_ok=True)
         best = mhm.images['topk'][-1]
         _, ax = plt.subplots()
         ax.imshow(best)
         ax.set_axis_off()
-        plt.savefig(os.path.join(out_best, wsi_ID+'_best.jpg'))
+        plt.savefig(os.path.join(out_best,mhm.gt+"_"+mhm.result_pred+"_"+wsi_ID+'_best.jpg'))
     plt.close('all')
 
 
