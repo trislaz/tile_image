@@ -7,9 +7,9 @@ def main(model_path, wsi_ID, embed_path, raw_path, out, table):
     mhm = MILHeatmat(model_path)    
     mhm.get_images(wsi_ID=wsi_ID, embeddings=embed_path, raw=raw_path, table=table)
     fig = mhm.get_summary_fig()
-    out = os.path.join('.', out, mhm.result_pred)
+    out = os.path.join('.', out)
     os.makedirs(out, exist_ok=True)
-    out_path = os.path.join(out, wsi_ID+'_summary.jpg')
+    out_path = os.path.join(out, mhm.result_pred+wsi_ID+'_summary.jpg')
     fig.savefig(out_path, bbox_inches='tight')
     plt.close(fig)
     
