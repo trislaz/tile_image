@@ -191,7 +191,7 @@ class MILHeatmat:
         if self.result_pred is '':
             msg = "Prediction of {} : {}.".format(self.target_name, self.pred)
         else:
-            msg = "Prediction of {} : {}. Ground truth: {}".format(self.target_name, self.pred, self.result_pred)
+            msg = "Prediction of {} : {}. Ground truth: {}".format(self.target_name, self.pred, self.gt)
         return msg
 
     def compute_and_save(self, wsi_ID, embeddings, raw):
@@ -311,7 +311,7 @@ class TileSampler:
         tile_indices = np.random.choice(rotated_infomat[sample], nb_tiles)
         return tile_indices
     
-#if __name__ == "__main__":
+if __name__ == "__main__":
 
 #%%
     model = '/Users/trislaz/Documents/cbio/projets/tile_image/data_test/model.pt.tar'

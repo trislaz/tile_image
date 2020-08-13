@@ -13,8 +13,6 @@ args = parser.parse_args()
 
 df = pd.read_csv(args.table)
 IDs = df['ID'].values
-out = os.path.join('.', args.out)
-os.makedirs(out, exist_ok=True)
 for i in IDs:
     main(model_path=args.model_path, wsi_ID=i, embed_path=args.embed_path,
         raw_path=args.raw_path, out_path=out, table=args.table, store_best=store_best)

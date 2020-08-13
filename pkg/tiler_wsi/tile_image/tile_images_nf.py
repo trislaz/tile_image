@@ -206,7 +206,7 @@ class ImageTiler:
             pickle.dump(infodict, f)
    
     def simple_tiler(self, param_tiles):
-        for o, para in enumerate(param_tiles):
+        for o, para in enumerate(param_tiles[:10]):
             patch = usi.get_image(slide=self.path_wsi, para=para, numpy=False)
             patch = patch.convert('RGB')
             new_name =  "tile_{}.jpg".format(o)
