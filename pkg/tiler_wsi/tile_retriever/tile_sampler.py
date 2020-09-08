@@ -278,17 +278,36 @@ class MILHeatmat:
         
 class TileSampler:
     def __init__(self, wsi_path, info_folder):
+        """Initialise a tile sampler object. Given a WSI, this sampler will automatize
+        different ways of selecting tiles inside it. 
+        This object is adapted to all types of WSI representations, as its sampling methods
+        return indices of tiles instead of tiles themselves.
+
+        Args:
+            wsi_path (str): path to the whole slide image (ndpi, svs ...)
+            info_folder (str): path to the info_folder of the dataset -and not of the slide-. 
+        """
         name_wsi, _ = os.path.splitext(os.path.basename(wsi_path))
         name_wsi = name_wsi.split('_embedded')[0]
         self.name_wsi = name_wsi
         self.path_wsi = wsi_path
         path_infomat = os.path.join(info_folder, name_wsi + '_infomat.npy')
         self.infomat = np.load(path_infomat)
+        self.total_tiles = self.infomat.sum()
         self.mask = self.infomat > 0
         self.dist = distance_transform_bf(self.mask)
         path_infodict = os.path.join(info_folder, name_wsi + '_infodict.pickle')
         with open(path_infodict, 'rb') as f:
             self.infodict = pickle.load(f)
+
+    def random_sampler(self, nb_tiles):
+        indices = np.random.randint(self.total_tiles, nb_tiles)
+        return indices
+
+    def random_biopsie(self, nb_tiles):
+        angle = np.random.randint(360)
+        indices = self.artificial_biopsie(angle=angle, nb_tiles=nb_tiles)
+        return indices
     
     def artificial_biopsie(self, angle, nb_tiles):
         """generate an artificial biopsie of $nb_tiles along the $angle.
