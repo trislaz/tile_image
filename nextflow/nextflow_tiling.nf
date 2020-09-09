@@ -7,21 +7,25 @@ level = 0
 mask_level = -1
 size = 256 
 auto_mask = 1
-tiler = 'simple' // dispo : simple | imagenet 
+tiler = 'simple' // dispo : simple | imagenet | imagenet_v2
 dataset = Channel.fromPath(glob_wsi)
 				 .map { file -> tuple(file.baseName, file) } 
 				 .into { dataset_1; dataset_2}
 root_outputs = file("${root_out}/${tiler}/size_${size}/res_${level}/")
 
 process Tiling {
-	if (tiler == 'simple'){
-	publishDir "${output_folder}", overwrite: true, pattern: "*.jpg", mode: 'copy'
+	if (tiler == 'simple' or tiler == 'imagenet_v2'){
+		publishDir "${output_folder}", overwrite: true, pattern: "*.jpg", mode: 'copy'
+		publishDir "${output_folder}", overwrite: true, pattern: "tile_*.npy", mode: 'copy'
+	}
+	else {
+		publishDir "$root_outputs/mat/", overwrite:true, pattern:"*_embedded.npy", mode: 'copy'
 	}
 	publishDir "$root_outputs/visu/", overwrite: true, pattern: "*.png", mode: 'copy'
-	publishDir "$root_outputs/mat/", overwrite:true, pattern:"*_embedded.npy", mode: 'copy'
 	publishDir "$root_outputs/info/", overwrite:true, pattern: "*_infomat.npy", mode: 'copy'
 	publishDir "$root_outputs/info/", overwrite:true, pattern: "*.pickle", mode: 'copy'
 	publishDir "$root_outputs/info/", overwrite:true, pattern: "*.csv", mode: 'copy'
+
 	queue "gpu-cbio"
 	maxForks 10
 	if (tiler == 'simple'){
@@ -37,6 +41,7 @@ process Tiling {
 	file('*.csv')
 	file('*.npy')
 	file('*.pickle')
+	file('*.jpg')
 	file('*.png')
 
 	script:
@@ -51,7 +56,7 @@ process Tiling {
 							--auto_mask ${auto_mask} \
 							--tiler ${tiler} \
 							--size $size \
-							--mask_level ${mask_level}
+							--mask_level ${mask_level} 
 	"""
 }
 
@@ -62,7 +67,7 @@ out .into{ out_1; out_2}
 out_1 .collect()
 	  .into{all_wsi_tiled_1; all_wsi_tiled_2}
 //
-if (tiler != 'simple'){
+//if (tiler != 'simple'){
 //	process ComputeGlobalMean {
 //		publishDir "${output_folder}", overwrite: true, mode: 'copy'
 //		memory { 10.GB }
@@ -82,6 +87,8 @@ if (tiler != 'simple'){
 //		"""
 //	}
 
+
+
 	process Incremental_PCA {
     publishDir "${output_folder}", overwrite: true, pattern: "*.txt", mode: 'copy'
 	publishDir "${output_folder}", overwrite:true, pattern: "*.joblib", mode: 'copy'
@@ -97,10 +104,10 @@ if (tiler != 'simple'){
 
     script:
     output_folder = "${root_outputs}/pca/"
-	mat_folder = "${root_outputs}/mat/"
+	mat_folder = "${root_outputs}"
     python_script = file("../scripts/pca_partial.py")
     """
-    python $python_script --path ${mat_folder}
+    python $python_script --path ${mat_folder} --tiler ${tiler}
     """
 	}
 

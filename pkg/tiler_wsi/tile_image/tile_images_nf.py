@@ -230,5 +230,27 @@ class ImageTiler:
         mat = np.vstack(tiles)
         np.save(os.path.join(self.path_outputs, '{}_embedded.npy'.format(self.name_wsi)), mat)
 
+    def imagenet_v2_tiler(self, param_tiles):
+        """Same as imagenet tiler, but save all the tiles in a different file
+
+        Args:
+            param_tiles (list): list of the parameters of each tiles (x, y, x0, y0, size)
+        """
+        model = resnet50(pretrained=True)
+        model.fc = Identity()
+        model = model.to(self.device)
+        model.eval()
+        preprocess = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        tiles = []
+        for o, para in enumerate(param_tiles):
+            image = usi.get_image(slide=self.slide, para=para, numpy=False)
+            image = image.convert("RGB")
+            image = preprocess(image).unsqueeze(0)
+            image = image.to(self.device)
+            with torch.no_grad():
+                t = model(image).squeeze()
+                t = t.cpu().numpy()
+                np.save(os.path.join(self.path_outputs, 'tile_{}.npy'.format(o)), t)
+
     def simclr_tiler(self, param_tiles):
         raise NotImplementedError

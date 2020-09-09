@@ -29,10 +29,22 @@ def check_dim(batch):
         ans = False
     return ans
 
+def get_files(path, tiler):
+    if tiler == 'imagenet':
+        files = glob(os.path.join(path, 'mat', '*.npy'))
+    elif tiler == 'imagenet_v2':
+        no_wsi = ['mat', 'info', 'visu']
+        files = []
+        wsis = [x for x in os.listdir(path) if (os.path.isdir(x) and x not in no_wsi)]
+        for wsi in wsis:
+            files += [x for x in os.listdir(os.path.join(path, wsi)) if x.endswith('.npy')]
+    return files
+
 if __name__=="__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--path", type = str, default=".", help="path to the files of tiles")
+    parser.add_argument("--tiler", type=str, default="imagenet", help="type of tiler, wether to use imagenet or imagenet_v2")
     args = parser.parse_args()
     files = glob(os.path.join(args.path, "*.npy"))
     ipca = IncrementalPCA()
@@ -42,7 +54,7 @@ if __name__=="__main__":
         if mat.sum() == 0:
             continue
         if check_dim(batch):
-            batch = np.concatenate(batch, axis=0)
+            batch = np.vstack(batch)
             ipca.partial_fit(X=batch)
             batch = []
         else:
