@@ -46,7 +46,7 @@ if __name__=="__main__":
     parser.add_argument("--path", type = str, default=".", help="path to the files of tiles")
     parser.add_argument("--tiler", type=str, default="imagenet", help="type of tiler, wether to use imagenet or imagenet_v2")
     args = parser.parse_args()
-    files = glob(os.path.join(args.path, "*.npy"))
+    files = get_files(args.path, args.tiler) 
     ipca = IncrementalPCA()
     batch = []
     for path in tqdm(files):
