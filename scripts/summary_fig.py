@@ -1,13 +1,13 @@
 from argparse import ArgumentParser
 import os
 import matplotlib.pyplot as plt
-from tiler_wsi.tile_retriever.tile_sampler import MILHeatmat
+from tiler_wsi.tile_retriever.tile_visualizer import MILHeatmat
 
 def main(model_path, wsi_ID, embed_path, raw_path, out, table, store_best=True):
     mhm = MILHeatmat(model_path)    
     mhm.get_images(wsi_ID=wsi_ID, embeddings=embed_path, raw=raw_path, table=table)
     fig = mhm.get_summary_fig()
-    out_summary = os.path.join('.', out, 'summaries')
+    out_summary = out
     os.makedirs(out_summary, exist_ok=True)
     out_summary = os.path.join(out_summary, mhm.result_pred+'_'+wsi_ID+'_summary.jpg')
     fig.savefig(out_summary, bbox_inches='tight')
@@ -29,7 +29,7 @@ if __name__ == '__main__':
     parser.add_argument('--embed_path', type=str, help='path to the embeddings')
     parser.add_argument('--raw_path', type=str, help='path to the raw images (ndpi, svs... )')
     parser.add_argument('--wsi_ID', type=str, help='ID = name of the slide to predict')
-    parser.add_argument('--out', type=str, help='folder to store the output', defautl='')
+    parser.add_argument('--out', type=str, help='folder to store the output', default='')
     parser.add_argument('--table', type=str, help='path to the table data containing ground truth. Same format as the table data\
                         used for training. If None, no outcome is given for the prediction (success or failure)', default=None)
     args = parser.parse_args()

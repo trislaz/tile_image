@@ -24,10 +24,20 @@ class TileSampler:
         self.infomat = np.load(path_infomat)
         self.mask = self.infomat > 0
         self.total_tiles = self.mask.sum()
+        # is necessary to apply 0 to the border so that background is always surrounding the image.
+        self.mask = self._force_background(self.mask)
         self.dist = distance_transform_bf(self.mask)
         path_infodict = os.path.join(info_folder, name_wsi + '_infodict.pickle')
         with open(path_infodict, 'rb') as f:
             self.infodict = pickle.load(f)
+
+    @staticmethod
+    def _force_background(mask):
+        mask[0, :] = 0
+        mask[-1,:] = 0
+        mask[:,0] = 0
+        mask[:,-1] = 0
+        return mask
 
     def random_sampler(self, nb_tiles):
         indices = np.random.randint(self.total_tiles, size=nb_tiles)

@@ -2,7 +2,7 @@
 import useful_wsi as usi
 from glob import glob
 from argparse import ArgumentParser
-from torchvision.models import resnet50
+from torchvision.models import resnet50, resnet18
 from torchvision import transforms
 from torch.nn import Identity
 import torch
@@ -198,7 +198,7 @@ class ImageTiler:
         for o, para in enumerate(param_tiles):
             infos.append({'ID': o, 'x':para[0], 'y':para[1], 'xsize':self.size[0], 'ysize':self.size[0], 'level':para[4]})
             infodict[o] = {'x':para[0], 'y':para[1], 'xsize':self.size[0], 'ysize':self.size[0], 'level':para[4]} 
-            infomat[para[0]//patch_size_0, para[1]//patch_size_0] = o 
+            infomat[para[0]//(patch_size_0+1), para[1]//(patch_size_0+1)] = o 
         df = pd.DataFrame(infos)
         df.to_csv(os.path.join(self.path_outputs, self.name_wsi + '_infos.csv'), index=False)
         np.save(os.path.join(self.path_outputs,self.name_wsi + '_infomat.npy'), infomat-1)
@@ -206,14 +206,14 @@ class ImageTiler:
             pickle.dump(infodict, f)
    
     def simple_tiler(self, param_tiles):
-        for o, para in enumerate(param_tiles[:10]):
+        for o, para in enumerate(param_tiles):
             patch = usi.get_image(slide=self.path_wsi, para=para, numpy=False)
             patch = patch.convert('RGB')
             new_name =  "tile_{}.jpg".format(o)
             patch.save(os.path.join(self.path_outputs, new_name))
 
     def imagenet_tiler(self, param_tiles):
-        model = resnet50(pretrained=True)
+        model = resnet18(pretrained=True)
         model.fc = Identity()
         model = model.to(self.device)
         model.eval()
@@ -236,7 +236,7 @@ class ImageTiler:
         Args:
             param_tiles (list): list of the parameters of each tiles (x, y, x0, y0, size)
         """
-        model = resnet50(pretrained=True)
+        model = resnet18(pretrained=True)
         model.fc = Identity()
         model = model.to(self.device)
         model.eval()

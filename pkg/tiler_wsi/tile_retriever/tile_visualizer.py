@@ -90,6 +90,7 @@ class MILHeatmat:
             infodict = pickle.load(f)
         #forward
         input_wsi = self._preprocess(wsi_embedded_path)
+        print(input_wsi.shape)
         _, pred = self.model.predict(input_wsi)
         # transform hooks to infomat.
         # Fills the images dict
