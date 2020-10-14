@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from glob import glob
 import yaml
 import useful_wsi as usi
+from copy import copy
 import numpy as np
 import pickle
 import pandas as pd
@@ -123,9 +124,12 @@ def filename(path:str):
 ## For the moment, I have to transpose infomat to have the good representation.
 ## Change directly in the tiling process, then here
 class MILHeatmat:
+
     def __init__(self, model, level_visu=-1, k=5):
         self.k = k
         self.model = load_model(model)
+        self.num_heads = self.model.args.num_heads
+        self.model_name = self.model.args.model_name
         self.target_name = self.model.args.target_name
         self.level_visu = level_visu
         self.tiles_weights = None
@@ -178,9 +182,13 @@ class MILHeatmat:
         # transform hooks to infomat.
         # Fills the images dict
         heatmap = self._transfer_to_infomat(infomat)
+
+        ###For debugging and interpretation of scores:
+        #heatmap_norm = self._transfert_feature_norm_to_infomat(infomat)
+        #self.images['heatmap_norm'] = heatmap_norm
+
         wsi_down = self._get_down_image(self.wsi_raw_path)
-        self._set_best_tiles(self.wsi_raw_path, heatmap, self.k, infomat, infodict)
-        heatmap[heatmap==0] = np.mean([self.scores['lowk'][0], self.scores['topk'][0]]) 
+        #self._set_best_tiles(self.wsi_raw_path, heatmap, self.k, infomat, infodict)
         self.images['heatmap'] = heatmap
         self.images['wsi_down'] = wsi_down
 
@@ -248,12 +256,13 @@ class MILHeatmat:
                           patches.Patch(facecolor=color_tile[1], edgecolor='black', label='Lowest scores')]
         assert self.images['topk'] is not None, "You have to first self.get_images"
         gridsize = (6, 4)
-        fig = plt.figure(figsize=(20, 20))
+        fig = plt.figure(figsize=(30, 20))
         visu = plt.subplot2grid(gridsize, (2, 0), rowspan=2, colspan=2, fig=fig)
         visu.imshow(self.images['wsi_down'])
         visu.set_axis_off()
         heatmap = plt.subplot2grid(gridsize, (2, 2), rowspan=2, colspan=2, fig=fig)
-        hm = heatmap.imshow(self.images['heatmap'], cmap='coolwarm', vmin=self.scores['lowk'][0])
+        hm = heatmap.imshow(self._make_background_neutral(self.images['heatmap']), cmap='coolwarm', vmin=self.scores['lowk'][0])
+        heatmap.set_title('Scores')
         fig.colorbar(hm, ax=heatmap)
         heatmap.set_axis_off()
         tiles = []
@@ -271,6 +280,54 @@ class MILHeatmat:
         fig.tight_layout()
         return fig
 
+    def get_heatmaps_fig(self): 
+        heatmaps = self.images['heatmap']
+        num_heads = heatmaps.shape[-1]
+        num_cases = round((num_heads + 1)/2)
+        gridsize = (num_cases, 2)
+        fig = plt.figure(figsize=(num_cases * 10, 20))
+        for nh in range(num_heads):
+            r = nh // 2
+            c = nh % 2
+            heatarray = self._make_background_neutral(self.images['heatmap'][:,:,nh])
+            heatmap = plt.subplot2grid(gridsize, (r, c), rowspan=1, colspan=1, fig=fig)
+            hm = heatmap.imshow(heatarray, cmap='coolwarm', vmin=heatarray.min())
+            heatmap.set_title('Scores')
+        visu = plt.subplot2grid(gridsize, (int(((num_heads+1)/2)//2), int(((num_heads+1)/2)%2)), rowspan=1, colspan=1, fig=fig)
+        visu.imshow(self.images['wsi_down'])
+        visu.set_axis_off()
+        add_titlebox(visu, self._make_message())
+        fig.tight_layout()
+        return fig
+
+
+    def get_summary_fig_norms(self):
+        fig = plt.figure(figsize=(20, 20))
+        gridsize = (4, 4)
+        h1, h2 = self.images['heatmap'], self.images['heatmap_norm']
+        heatmap = np.sqrt(np.multiply(h1, h2))
+        heatmap[heatmap==0] = np.mean([heatmap.max(), heatmap.min()]) 
+        h2[heatmap==0] = np.mean([h2.max(), h2.min()]) 
+        visu = plt.subplot2grid(gridsize, (0, 0), rowspan=2, colspan=4, fig=fig)
+        pcm = visu.imshow(heatmap, cmap='coolwarm')
+        fig.colorbar(pcm, ax=visu)
+        heat1 = plt.subplot2grid(gridsize, (2, 0), rowspan=2, colspan=2, fig=fig)
+        pcm = heat1.imshow(h1, cmap='coolwarm')
+        heat1.set_title('scores')
+        fig.colorbar(pcm, ax=heat1)
+        heat2 = plt.subplot2grid(gridsize, (2, 2), rowspan=2, colspan=2, fig=fig)
+        pcm = heat2.imshow(h2, cmap='coolwarm')
+        fig.colorbar(pcm, ax=heat2)
+        heat2.set_title('embedding norm')
+
+        ##plt.subplot(1,2,1)
+        ##plt.imshow(self.images['heatmap'], figure=fig)
+        ##plt.colorbar()
+        ##plt.subplot(1, 2, 2)
+        ##plt.imshow(self.images['heatmap_norm'], figure=fig)
+        ##plt.colorbar()
+        return fig
+
     def _make_message(self):
         if self.result_pred is '':
             msg = "Prediction of {} : {}.".format(self.target_name, self.pred)
@@ -278,7 +335,6 @@ class MILHeatmat:
             msg = "Prediction of {} : {}. Ground truth: {}".format(self.target_name, self.pred, self.gt)
         return msg
 
-    def compute_and_save(self, wsi_ID, embeddings, raw):
         out_path = os.path.join(self.out_path, wsi_ID + '_heatmap.jpg')
         fig, _ = self.compute_heatmap(wsi_ID, embeddings, raw)
         fig.savefig(out_path)
@@ -290,17 +346,36 @@ class MILHeatmat:
             infomat (npy): npy array containing the index of each tile
         """
         assert self.tiles_weights is not None, "you have to compute one forward pass of the model"
+        size = (infomat.shape[0], infomat.shape[1], self.num_heads)
+        infomat = infomat.flatten()
+        heatmap = np.zeros((len(infomat), self.num_heads))
+        for o, i in enumerate(infomat):
+            if i > 0:
+                for nh in range(self.num_heads):
+                    heatmap[o, :] = self.tiles_weights[int(i), :]
+        heatmap = heatmap.reshape(size)
+        return heatmap
+
+    def _transfert_feature_norm_to_infomat(self, infomat):
+        """
+        transfers the norm of the feature vectors on to the infomat
+        Mostly there for debugging AND interprete the scores
+        """
         size = infomat.shape
         infomat = infomat.flatten()
         heatmap = np.zeros(len(infomat))
         for o, i in enumerate(infomat):
             if i > 0:
-                heatmap[o] = self.tiles_weights[int(i)]
+                heatmap[o] = np.linalg.norm(self.tiles_features, axis=1)[int(i)]
         heatmap = heatmap.reshape(size)
+        heatmap[heatmap==0] = np.mean([heatmap.max(), heatmap.min()])
         return heatmap
 
     ## for debugging
     def plot_infomat(self, image, infomat):
+        """
+        Plots infomat and image superimposed
+        """
         figure = plt.figure(figsize=(25, 20))
         plt.imshow(np.mean(image, axis=2), cmap='gray', interpolation='bilinear')
         plt.axis('off')
@@ -309,34 +384,46 @@ class MILHeatmat:
         plt.imshow(infomat, cmap='red', interpolation='nearest', alpha=.5, extent=(xmin,xmax,ymin,ymax))   # for heatmap to overlap
         return figure
 
-    def plot_heatmap(self, image, heatmap):
-        #figure = plt.figure(figsize=(20, 20))
-        #plt.imshow(np.mean(image, axis=2), cmap='gray', interpolation='bilinear')
-        #plt.axis('off')
-        #xmin, xmax = plt.xlim()
-        #ymin, ymax = plt.ylim()
-        #plt.imshow(heatmap.T, cmap='coolwarm', interpolation='nearest', alpha=.6 extent=(xmin,xmax,ymin,ymax))   # for heatmap to overlap
-        plt.figure(figsize=(20, 20))
-        plt.subplot(121)
-        plt.imshow(image)
-        plt.subplot(122)
-        plt.imshow(heatmap.T, cmap='red')
-        return figure
-
     def _get_hook(self):
         def hook_tiles(m, i, o):
             tiles_weights = o
             self.tiles_weights = tiles_weights.squeeze().detach().cpu().numpy()
 
-        def get_all_layers(net):
+
+        def hook_features(m, i, o):
+            tiles_features = o
+            self.tiles_features = tiles_features.squeeze().detach().cpu().numpy()
+
+        def hooker_attentionmil(net):
             for name, layer in net.named_children():
                 if list(layer.children()):
-                    get_all_layers(layer)
+                    hooker_attentionmil(layer)
                 if name == 'weight_extractor':
                     hook_layer = list(layer.children())[2]
                     hook_layer.register_forward_hook(hook_tiles)
                     print('Hook in place, captain')
-        get_all_layers(self.model.network)
+
+        def hooker_multiheadmil(net):
+            for name, layer in net.named_children():
+                if list(layer.children()):
+                    hooker_multiheadmil(layer)
+                if name == 'attention':
+                    hook_layer = list(layer.children())[1]
+                    hook_layer.register_forward_hook(hook_tiles)
+                    print('Hook in place, captain')
+    
+        hooker_dict = {'attentionmil': hooker_attentionmil,
+                'multiheadmil': hooker_multiheadmil}
+        hooker_dict[self.model_name](self.model.network)
+
+    @staticmethod
+    def _make_background_neutral(heatmap):
+        """
+        For the sake of visibility, puts the background neutral.
+        """
+        heatmap_neutral = copy(heatmap)
+        heatmap_neutral[heatmap_neutral == 0] = np.mean([heatmap_neutral.max(), heatmap_neutral.min()])
+        return heatmap_neutral
 
     def _preprocess(self, input_path):
         """preprocess the input to feed the model
@@ -360,7 +447,7 @@ class MILHeatmat:
         image = usi.get_whole_image(self.wsi, level=self.level_visu, numpy=True)
         return image
         
-#if __name__ == "__main__":
+if __name__ == "__main__":
 
 #%%
     model = '/Users/trislaz/Documents/cbio/projets/tile_image/data_test/model.pt.tar'

@@ -6,20 +6,20 @@ from tiler_wsi.tile_retriever.tile_visualizer import MILHeatmat
 def main(model_path, wsi_ID, embed_path, raw_path, out, table, store_best=True):
     mhm = MILHeatmat(model_path)    
     mhm.get_images(wsi_ID=wsi_ID, embeddings=embed_path, raw=raw_path, table=table)
-    fig = mhm.get_summary_fig()
+    fig = mhm.get_heatmaps_fig()
     out_summary = out
     os.makedirs(out_summary, exist_ok=True)
     out_summary = os.path.join(out_summary, mhm.result_pred+'_'+wsi_ID+'_summary.jpg')
     fig.savefig(out_summary, bbox_inches='tight')
     #Saving best tiles
-    if store_best:
-        out_best = os.path.join('.', out, 'best_tiles')
-        os.makedirs(out_best, exist_ok=True)
-        best = mhm.images['topk'][-1]
-        _, ax = plt.subplots()
-        ax.imshow(best)
-        ax.set_axis_off()
-        plt.savefig(os.path.join(out_best,mhm.gt+"_"+mhm.result_pred+"_"+wsi_ID+'_best.jpg'))
+    #if store_best:
+    #    out_best = os.path.join('.', out, 'best_tiles')
+    #    os.makedirs(out_best, exist_ok=True)
+    #    best = mhm.images['topk'][-1]
+    #    _, ax = plt.subplots()
+    #    ax.imshow(best)
+    #    ax.set_axis_off()
+    #    plt.savefig(os.path.join(out_best,mhm.gt+"_"+mhm.result_pred+"_"+wsi_ID+'_best.jpg'))
     plt.close('all')
 
 
