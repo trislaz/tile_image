@@ -21,8 +21,10 @@ class TileSampler:
         self.name_wsi = name_wsi
         self.path_wsi = wsi_path
         path_infomat = os.path.join(info_folder, name_wsi + '_infomat.npy')
+        path_predmap = os.path.join(info_folder, name_wsi + '_predmap.npy' ) if os.path.exists(os.path.join(info_folder, name_wsi + '_predmap.npy' )) else None
         self.infomat = np.load(path_infomat)
-        self.mask = self.infomat > 0
+        self.predmap = np.load(path_predmap) if path_predmap is not None else None
+        self.mask = self.infomat >= 0
         self.total_tiles = self.mask.sum()
         # is necessary to apply 0 to the border so that background is always surrounding the image.
         self.mask = self._force_background(self.mask)
@@ -41,6 +43,38 @@ class TileSampler:
 
     def random_sampler(self, nb_tiles):
         indices = np.random.randint(self.total_tiles, size=nb_tiles)
+        return indices
+
+    def all_sampler(self, nb_tiles):
+        indices = list(range(self.total_tiles))
+        return indices
+
+    def predmap_random_sampler(self, nb_tiles):
+        """
+        samples the nb_tiles first tiles in term of scores of interest - classifier-
+        """
+        #pm = self.predmap[self.predmap > 0]
+        #fpreds = np.sort(pm.flatten())[:min(nb_tiles)]
+        total = (self.predmap > -1).sum()
+        if nb_tiles < total:
+            fpreds = np.argpartition(self.predmap.flatten(), -nb_tiles)[-nb_tiles:]
+        else :
+            fpreds = np.argpartition(self.predmap.flatten(), -total)[-total:]
+        infomat_coord = [np.unravel_index(x, self.infomat.shape) for x in fpreds]
+        indices = np.array([int(self.infomat[x[0], x[1]]) for x in infomat_coord])
+        return indices
+
+    def predmap_all_sampler(self, nb_tiles):
+        """
+        Selects all the interest tiles. 
+        Completes until nb_tiles with 0 ones.
+        """
+        fpred0= np.where((self.predmap > 0.5).flatten())[0]
+        fpred1 = np.where(np.logical_and(self.predmap > -1, self.predmap <= 0.5).flatten())[0]
+        infomat_coord = [np.unravel_index(x, self.infomat.shape) for x in fpred1]
+        if len(fpred1) < nb_tiles:
+            infomat_coord += [np.unravel_index(x, self.infomat.shape) for x in np.random.permutation(fpred0)][:nb_tiles-len(fpred1)]
+        indices = np.array([int(self.infomat[x[0], x[1]]) for x in infomat_coord])
         return indices
 
     def random_biopsie(self, nb_tiles):
