@@ -1,16 +1,20 @@
 from argparse import ArgumentParser
 import os
+import numpy as np
 import matplotlib.pyplot as plt
 from tiler_wsi.tile_retriever.tile_visualizer import MILHeatmat
 
 def main(model_path, wsi_ID, embed_path, raw_path, out, table, store_best=True):
     mhm = MILHeatmat(model_path)    
     mhm.get_images(wsi_ID=wsi_ID, embeddings=embed_path, raw=raw_path, table=table)
-    fig = mhm.get_heatmaps_fig()
+    #fig = mhm.get_heatmaps_fig()
+    repres = mhm.reprewsi
     out_summary = out
-    os.makedirs(out_summary, exist_ok=True)
-    out_summary = os.path.join(out_summary, mhm.result_pred+'_'+wsi_ID+'_summary.jpg')
-    fig.savefig(out_summary, bbox_inches='tight')
+    #os.makedirs(out_summary, exist_ok=True)
+    #out_summary = os.path.join(out_summary, mhm.result_pred+'_'+wsi_ID+'_summary.jpg')
+    out_summary = os.path.join(out_summary, wsi_ID)
+    np.save(out_summary, repres)
+    #fig.savefig(out_summary, bbox_inches='tight')
     #Saving best tiles
     #if store_best:
     #    out_best = os.path.join('.', out, 'best_tiles')

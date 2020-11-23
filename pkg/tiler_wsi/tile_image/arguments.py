@@ -9,8 +9,10 @@ def get_arguments():
     parser.add_argument('--mask_level', type=int, default=-1, help="scale at which has been created the mask. negatives indicate counting levels from the end (slide.level_count)")
     parser.add_argument('--size', type=int, default = 256, help="size of patches")
     parser.add_argument('--auto_mask', type=int, default=1, help="if 1, mask is .npy, .xml else")
-    parser.add_argument('--tiler', type=str, default='simple', help='type of tiler : imagenet | simple | simclr')
+    parser.add_argument('--tiler', type=str, default='simple', help='type of tiler : imagenet | simple | simclr | moco')
     parser.add_argument('--path_outputs', type=str, help='output folder path', default='.')
+    parser.add_argument('--model_path', type=str, default='.', help='if using moco, path to the trained resnet')
+    parser.add_argument('--mask_tolerance', type=float, default=0.75)
     args = parser.parse_args()
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     return args

@@ -122,24 +122,30 @@ def make_label_with_otsu(xml_file, rgb_img):
     return merge_mask
 
 class ImageTiler:
-    def __init__(self, args):
+    def __init__(self, args, make_info=True):
         self.level = args.level # Level to which sample patch.
+        self.sampling_method = 'grid'# grid
+        self.n_samples = 15 # pour les slides 0.
         self.device = args.device
         self.size = (args.size, args.size)
         self.path_wsi = args.path_wsi 
         self.path_outputs = args.path_outputs
         self.auto_mask = args.auto_mask
         self.path_mask = args.path_mask
+        self.model_path = args.model_path 
+        self.infomat = None
+        self.prediction_map = None
+        self.mask = None
         self.tiler = args.tiler
         self.name_wsi, self.ext_wsi = os.path.splitext(os.path.basename(self.path_wsi))
         self.slide = usi.open_image(self.path_wsi)
+        self.make_info = make_info
         if args.mask_level < 0:
             self.mask_level = self.slide.level_count + args.mask_level
         else:
             self.mask_level = args.mask_level    
         self.rgb_img = usi.get_whole_image(self.slide, level=self.mask_level, numpy=True)
-        self.mask_function = self._get_mask_function()
-        self.mask_tolerance = 0.8
+        self.mask_tolerance = args.mask_tolerance
 
     def _get_mask_function(self):
         """
@@ -147,7 +153,10 @@ class ImageTiler:
         binary mask, used to tile it. here it is.
         """
         if self.path_mask == "no":
-            mask_function = lambda x: np.ones(self.rgb_img.shape[0:-1])
+            if self.mask is not None:
+                mask_function = lambda x: self.mask
+            else:
+                mask_function = lambda x: np.ones(self.rgb_img.shape[0:-1])
         else:
             if self.auto_mask:
                 path_mask = os.path.join(self.path_mask, self.name_wsi + ".npy")
@@ -161,13 +170,15 @@ class ImageTiler:
         return mask_function
 
     def tile_image(self):
+        self.mask_function = self._get_mask_function()
         tiler = getattr(self, self.tiler + '_tiler')
         param_tiles = usi.patch_sampling(slide=self.slide, mask_level=self.mask_level, mask_function=self.mask_function, 
-            sampling_method='grid', analyse_level=self.level, patch_size=self.size, mask_tolerance = self.mask_tolerance)
-        self._make_infodocs(param_tiles)
+            sampling_method=self.sampling_method, n_samples=self.n_samples, analyse_level=self.level, patch_size=self.size, mask_tolerance = self.mask_tolerance)
+        if self.make_info:
+            self._make_infodocs(param_tiles)
+            self._make_visualisations(param_tiles)
         tiler(param_tiles)
-        self._make_visualisations(param_tiles)
-    
+   
     def _make_visualisations(self, param_tiles):
         import matplotlib as mpl
         mpl.use('Agg')
@@ -195,22 +206,28 @@ class ImageTiler:
         infodict = {}
         infos=[]
         infomat , patch_size_0 = self._get_infomat() 
+        if self.tiler == 'classifier':
+            self.infomat_classif = np.zeros(infomat.shape)
         for o, para in enumerate(param_tiles):
             infos.append({'ID': o, 'x':para[0], 'y':para[1], 'xsize':self.size[0], 'ysize':self.size[0], 'level':para[4]})
             infodict[o] = {'x':para[0], 'y':para[1], 'xsize':self.size[0], 'ysize':self.size[0], 'level':para[4]} 
-            infomat[para[0]//(patch_size_0+1), para[1]//(patch_size_0+1)] = o 
+            infomat[para[0]//(patch_size_0+1), para[1]//(patch_size_0+1)] = o+1 #+1 car 3 lignes plus loin je sauve infomat-1 (background à -1) 
         df = pd.DataFrame(infos)
         df.to_csv(os.path.join(self.path_outputs, self.name_wsi + '_infos.csv'), index=False)
         np.save(os.path.join(self.path_outputs,self.name_wsi + '_infomat.npy'), infomat-1)
         with open(os.path.join(self.path_outputs, self.name_wsi + '_infodict.pickle'), 'wb') as f:
             pickle.dump(infodict, f)
+        self.infomat = infomat -1
+        self.prediction_map = np.zeros(infomat.shape) - 1
    
     def simple_tiler(self, param_tiles):
         for o, para in enumerate(param_tiles):
             patch = usi.get_image(slide=self.path_wsi, para=para, numpy=False)
             patch = patch.convert('RGB')
-            new_name =  "tile_{}.jpg".format(o)
+            name_wsi = os.path.splitext(os.path.basename(self.path_wsi))[0]
+            new_name =  "{}_{}.jpg".format(name_wsi, o)
             patch.save(os.path.join(self.path_outputs, new_name))
+            del patch
 
     def imagenet_tiler(self, param_tiles):
         model = resnet18(pretrained=True)
@@ -218,6 +235,119 @@ class ImageTiler:
         model = model.to(self.device)
         model.eval()
         preprocess = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        tiles = []
+        for o, para in enumerate(param_tiles):
+            image = usi.get_image(slide=self.slide, para=para, numpy=False)
+            image = image.convert("RGB")
+            image = preprocess(image).unsqueeze(0)
+            image = image.to(self.device)
+            with torch.no_grad():
+                t = model(image).squeeze()
+            tiles.append(t.cpu().numpy())
+        mat = np.vstack(tiles)
+        np.save(os.path.join(self.path_outputs, '{}_embedded.npy'.format(self.name_wsi)), mat)
+
+    def _transfer_to_prediction_map(self, pred, o):
+        """
+        pred = prediction of the classifier
+        o = id of the tile
+        used with the classifier tiler.
+        """
+        assert self.infomat is not None, "Pas d'infomat !"
+        index = np.where((self.infomat == o).flatten())[0]
+        r,c = np.unravel_index(index, shape=self.infomat.shape)
+        self.prediction_map[r,c] = pred
+
+    def imagenet_classifier_tiler(self, param_tiles):
+        """
+        encodes the tiles with imagenet AND heatmap (predmap) with the binary classifier.
+        """
+        model = resnet18()
+        model.fc = torch.nn.Linear(512, 2)
+        checkpoint = torch.load(self.model_path, map_location='cpu')
+        
+        state_dict = checkpoint['state_dict']
+        for k in list(state_dict.keys()):
+            if k.startswith('module.'):
+                state_dict[k.replace('module.', '')] = state_dict[k]
+                del state_dict[k]
+
+        model.load_state_dict(checkpoint['state_dict'])
+        model = model.to(self.device)
+        model.eval()
+        preprocess = self._get_transforms(imagenet=True) 
+        tiles = []
+        for o, para in enumerate(param_tiles):
+            image = usi.get_image(slide=self.slide, para=para, numpy=False)
+            image = image.convert("RGB")
+            image = preprocess(image).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                proba = torch.nn.functional.softmax(model(image).squeeze(), dim=0)
+                pred = proba[0].item()
+            self._transfer_to_prediction_map(pred, o)
+        np.save(os.path.join(self.path_outputs, '{}_predmap.npy'.format(self.name_wsi)), self.prediction_map)
+        self.imagenet_tiler(param_tiles)
+
+    def classifier_tiler(self, param_tiles):
+        model = resnet18()
+        model.fc = torch.nn.Linear(512, 2)
+        checkpoint = torch.load(self.model_path, map_location='cpu')
+        
+        state_dict = checkpoint['state_dict']
+        for k in list(state_dict.keys()):
+            if k.startswith('module.'):
+                state_dict[k.replace('module.', '')] = state_dict[k]
+                del state_dict[k]
+
+        model.load_state_dict(checkpoint['state_dict'])
+        self._get_hook(model)
+        model = model.to(self.device)
+        model.eval()
+        preprocess = self._get_transforms(imagenet=True) 
+        tiles = []
+        for o, para in enumerate(param_tiles):
+            image = usi.get_image(slide=self.slide, para=para, numpy=False)
+            image = image.convert("RGB")
+            image = preprocess(image).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                proba = torch.nn.functional.softmax(model(image).squeeze(), dim=0)
+                pred = proba[0].item()
+            tiles.append(self.tile_features)
+            self._transfer_to_prediction_map(pred, o)
+        mat = np.vstack(tiles)
+        np.save(os.path.join(self.path_outputs, '{}_embedded.npy'.format(self.name_wsi)), mat)
+        np.save(os.path.join(self.path_outputs, '{}_predmap.npy'.format(self.name_wsi)), self.prediction_map)
+
+    def _get_transforms(self, imagenet=True):
+        if not imagenet:
+            if self.size[0] == 256:
+                trans = transforms.Compose([transforms.ToTensor(),
+                    transforms.Normalize([0.753, 0.584,  0.706], [0.128, 0.157, 0.122])])
+            elif self.size[0] == 512:
+                trans = transforms.Compose([transforms.ToTensor(), 
+                    transforms.Normalize([0.763, 0.602, 0.718], [0.134, 0.174, 0.131])])
+        else: 
+            trans = transforms.Compose([transforms.ToTensor(), 
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        return trans
+
+    def moco_tiler(self, param_tiles):
+        model = resnet18()
+        checkpoint = torch.load(self.model_path, map_location='cpu')
+        # rename moco pre-trained keys
+        state_dict = checkpoint['state_dict']
+        for k in list(state_dict.keys()):
+            # retain only encoder_q up to before the embedding layer
+            if k.startswith('module.encoder_q') and not k.startswith('module.encoder_q.fc'):
+                # remove prefix
+                state_dict[k[len("module.encoder_q."):]] = state_dict[k]
+            # delete renamed or unused k
+            del state_dict[k]
+        model.load_state_dict(state_dict, strict=False)
+        model.fc = Identity()
+        model = model.to(self.device)
+        model.eval()
+        preprocess = self._get_transforms(imagenet=False)
         tiles = []
         for o, para in enumerate(param_tiles):
             image = usi.get_image(slide=self.slide, para=para, numpy=False)
@@ -254,3 +384,21 @@ class ImageTiler:
 
     def simclr_tiler(self, param_tiles):
         raise NotImplementedError
+
+    def _get_hook(self, model):
+        def hook_tiles(m, i, o):
+            tile_features = o
+            self.tile_features = tile_features.squeeze().detach().cpu().numpy()
+
+        def hooker_resnet(net):
+            for name, layer in net.named_children():
+                if name == 'avgpool':
+                    layer.register_forward_hook(hook_tiles)
+                    print('Hook in place, captain')
+        hooker_resnet(model)
+
+
+
+
+
+

@@ -9,14 +9,24 @@ def main(model_path):
     raw_path = state['args'].raw_path #"/mnt/data4/gbataillon/Dataset/Curie/Global/raw"
     embed_path = state['args'].wsi#"/mnt/data4/tlazard/data/curie/curie_recolo_tiled/imagenet/size_256/res_2" #
     table = state['args'].table_data #"/mnt/data4/tlazard/3LST100.csv" #
-    test = state['args'].test_fold
+    if 'test_fold' in vars(state['args']):
+        test = None#state['args'].test_fold
+    else:
+        test = None
     out = os.path.join(os.path.dirname(model_path), 'summaries_test_{}'.format(test))
+    os.makedirs(out, exist_ok=True)
     df = pd.read_csv(table)
-    test_rows = df['test'] == test
+    if test:
+        test_rows = df['test'] == test
+    else:
+        test_rows = df.columns
     IDs = df[test_rows]['ID'].values
     for i in IDs:
-        process_slide(model_path=model_path, wsi_ID=i, embed_path=embed_path,
-            raw_path=raw_path, out=out, table=table)
+        try:
+            process_slide(model_path=model_path, wsi_ID=i, embed_path=embed_path,
+                raw_path=raw_path, out=out, table=table)
+        except:
+            continue
 
 if __name__ == "__main__":
 

@@ -35,14 +35,13 @@ if __name__=="__main__":
     parser.add_argument("--path", 
                         type=str,
                         help="Path to the WSI file (.npy)")
-    parser.add_argument("--pca", 
-                        type=str,
-                        help="Path to the fitted pca model")
 
     args = parser.parse_args()
-    ipca = load(args.pca)
-    wsi = np.load(args.path)
-    wsi_transformed = ipca.transform(wsi)
-    name = os.path.basename(args.path)
-    np.save(name, wsi_transformed)
+    ipca = load(os.path.join(args.path, 'pca', 'pca_tiles.joblib'))
+    files = glob(os.path.join(args.path, 'mat', '*.npy'))
+    for f in files:
+        name = os.path.basename(f)
+        mat = np.load(f)
+        mat_pca = ipca.transform(mat)
+        np.save(name, mat_pca)
 

@@ -127,7 +127,8 @@ class MILHeatmat:
 
     def __init__(self, model, level_visu=-1, k=5):
         self.k = k
-        self.model = load_model(model)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = load_model(model, self.device)
         self.num_heads = self.model.args.num_heads
         self.model_name = self.model.args.model_name
         self.target_name = self.model.args.target_name
@@ -191,8 +192,7 @@ class MILHeatmat:
         #self._set_best_tiles(self.wsi_raw_path, heatmap, self.k, infomat, infodict)
         self.images['heatmap'] = heatmap
         self.images['wsi_down'] = wsi_down
-
-        self.pred = self.model.args.target_correspondance[int(pred)]
+        self.pred = pred#self.model.args.target_correspondance[int(pred)]
         if table is not None:
             self.gt = self._extract_groundtruth(table, wsi_ID)
             self.result_pred = 'success' if self.gt == self.pred else 'failure'
@@ -201,6 +201,7 @@ class MILHeatmat:
         if isinstance(table, str):
             table = pd.read_csv(table)
         gt = table[table['ID'] == wsi_ID][self.target_name].values[0]
+        gt = self.model.target_correspondance[gt]
         return gt
         
     def _plot_loc_tile(self, ax, color, para):
@@ -283,7 +284,7 @@ class MILHeatmat:
     def get_heatmaps_fig(self): 
         heatmaps = self.images['heatmap']
         num_heads = heatmaps.shape[-1]
-        num_cases = round((num_heads + 1)/2)
+        num_cases = round((num_heads + 1)/2)+1
         gridsize = (num_cases, 2)
         fig = plt.figure(figsize=(num_cases * 10, 20))
         for nh in range(num_heads):
@@ -293,7 +294,8 @@ class MILHeatmat:
             heatmap = plt.subplot2grid(gridsize, (r, c), rowspan=1, colspan=1, fig=fig)
             hm = heatmap.imshow(heatarray, cmap='coolwarm', vmin=heatarray.min())
             heatmap.set_title('Scores')
-        visu = plt.subplot2grid(gridsize, (int(((num_heads+1)/2)//2), int(((num_heads+1)/2)%2)), rowspan=1, colspan=1, fig=fig)
+            heatmap.set_axis_off()
+        visu = plt.subplot2grid(gridsize, (int(((num_heads+1)/2)//2)+1, int(((num_heads+1)/2)%2)), rowspan=1, colspan=1, fig=fig)
         visu.imshow(self.images['wsi_down'])
         visu.set_axis_off()
         add_titlebox(visu, self._make_message())
@@ -352,7 +354,10 @@ class MILHeatmat:
         for o, i in enumerate(infomat):
             if i > 0:
                 for nh in range(self.num_heads):
-                    heatmap[o, :] = self.tiles_weights[int(i), :]
+                    if len(self.tiles_weights.shape) > 1:
+                        heatmap[o, :] = self.tiles_weights[int(i), :]
+                    else:
+                        heatmap[o, :] = self.tiles_weights[int(i)]# avec le nouveau code infomat, enlever le +1 !!! juste, erreur lors de la création infomat (14/10/20)
         heatmap = heatmap.reshape(size)
         return heatmap
 
@@ -389,10 +394,14 @@ class MILHeatmat:
             tiles_weights = o
             self.tiles_weights = tiles_weights.squeeze().detach().cpu().numpy()
 
-
         def hook_features(m, i, o):
             tiles_features = o
             self.tiles_features = tiles_features.squeeze().detach().cpu().numpy()
+
+        def hook_reprewsi(m, i, o):
+            repre = i[0].view(self.num_heads, -1)
+            print(repre.shape)
+            self.reprewsi = repre.squeeze().detach().cpu().numpy()
 
         def hooker_attentionmil(net):
             for name, layer in net.named_children():
@@ -408,12 +417,19 @@ class MILHeatmat:
                 if list(layer.children()):
                     hooker_multiheadmil(layer)
                 if name == 'attention':
-                    hook_layer = list(layer.children())[1]
+                    hook_layer = list(layer.children())[0]
                     hook_layer.register_forward_hook(hook_tiles)
                     print('Hook in place, captain')
+                if name == 'classifier':
+                    hook_layer =  list(layer.children())[0]
+                    hook_layer.register_forward_hook(hook_reprewsi)
     
         hooker_dict = {'attentionmil': hooker_attentionmil,
-                'multiheadmil': hooker_multiheadmil}
+                'multiheadmil': hooker_multiheadmil,
+                'multiheadmulticlass': hooker_multiheadmil, 
+                'mhmc_layers_reg': hooker_multiheadmil,
+                'mhmc_layers':hooker_multiheadmil,
+                }
         hooker_dict[self.model_name](self.model.network)
 
     @staticmethod
@@ -435,7 +451,7 @@ class MILHeatmat:
         inp = np.load(input_path)[:,:depth]
         inp = torch.Tensor(inp)
         inp = inp.unsqueeze(0)
-        inp = inp.to(self.model.device)
+        inp = inp.to(self.device)
         return inp
 
     def _get_down_image(self, wsi):

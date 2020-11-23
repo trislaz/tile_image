@@ -30,7 +30,7 @@ def check_dim(batch):
     return ans
 
 def get_files(path, tiler):
-    if tiler == 'imagenet':
+    if tiler == 'imagenet' or tiler == 'moco' or tiler == 'classifier' or tiler == 'imagenet_classifier':
         files = glob(os.path.join(path, 'mat', '*.npy'))
     elif tiler == 'imagenet_v2':
         no_wsi = ['mat', 'info', 'visu']
