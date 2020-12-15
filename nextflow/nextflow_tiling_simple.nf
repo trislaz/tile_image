@@ -1,10 +1,10 @@
 #!/usr/bin/env nextflow
-glob_wsi = '/gpfsdsstore/projects/rech/gdg/uub32zv/data_sfp/train/raw/*.tif' // insert glob pattern at the end (*.tiff for instance)
-root_out = '/gpfsscratch/rech/gdg/uub32zv/working_data/embedded'
-path_mask = '/gpfsdsstore/projects/rech/gdg/uub32zv/data_sfp/train/masks/auto'
-level = 2 
-mask_level = -4
-size = 256 
+glob_wsi = '/Users/trislaz/Documents/cbio/data/triples_marquages/*.svs' // insert glob pattern at the end (*.tiff for instance)
+root_out = '/Users/trislaz/Documents/cbio/projets/triples_marquages/tiles'
+path_mask = '/Users/trislaz/Documents/cbio/projets/triples_marquages/masks'
+level = 1 
+mask_level = -1
+size =  2048
 auto_mask = 1
 tiler = 'simple' // dispo : simple | imagenet | imagenet_v2
 dataset = Channel.fromPath(glob_wsi)
@@ -18,10 +18,6 @@ process Tiling_folder {
 	publishDir "$root_outputs/info/", overwrite:true, pattern: "*_infomat.npy", mode: 'copy'
 	publishDir "$root_outputs/info/", overwrite:true, pattern: "*.pickle", mode: 'copy'
 	publishDir "$root_outputs/info/", overwrite:true, pattern: "*.csv", mode: 'copy'
-
-	queue "prepost"
-	memory "30GB"
-	maxForks 50
 
 	input:
 	set val(slideID), file(slidePath) from dataset_1
