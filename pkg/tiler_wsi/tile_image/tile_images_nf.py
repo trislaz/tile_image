@@ -122,7 +122,7 @@ def make_label_with_otsu(xml_file, rgb_img):
     return merge_mask
 
 class ImageTiler:
-    def __init__(self, args, make_info=True):
+    def __init__(self, args, make_info=True, nf=True):
         self.level = args.level # Level to which sample patch.
         self.sampling_method = 'grid'# grid
         self.n_samples = 15 # pour les slides 0.
@@ -138,6 +138,9 @@ class ImageTiler:
         self.mask = None
         self.tiler = args.tiler
         self.name_wsi, self.ext_wsi = os.path.splitext(os.path.basename(self.path_wsi))
+        self.path_info = '.' if nf else os.path.join(self.path_outputs, 'info') 
+        self.path_visu = '.' if nf else os.path.join(self.path_outputs, 'visu')
+        self.path_tiles = '.' if nf else os.path.join(self.path_outputs, self.name_wsi)
         self.slide = usi.open_image(self.path_wsi)
         self.make_info = make_info
         if args.mask_level < 0:
@@ -186,7 +189,7 @@ class ImageTiler:
         PLOT_ARGS = {'color': 'red', 'size': (12, 12),  'with_show': False,
                      'title': "n_tiles={}".format(len(param_tiles))}
         usi.visualise_cut(self.slide, param_tiles, res_to_view=self.mask_level, plot_args=PLOT_ARGS)
-        plt.savefig("{}_visu.png".format(self.name_wsi))
+        plt.savefig("{}_visu.png".format(os.path.join(self.path_visu,self.name_wsi)))
 
     def _get_infomat(self):
         """Returns a zeros matrix, such that each entry correspond to a tile in the WSI.
@@ -213,9 +216,9 @@ class ImageTiler:
             infodict[o] = {'x':para[0], 'y':para[1], 'xsize':self.size[0], 'ysize':self.size[0], 'level':para[4]} 
             infomat[para[0]//(patch_size_0+1), para[1]//(patch_size_0+1)] = o+1 #+1 car 3 lignes plus loin je sauve infomat-1 (background à -1) 
         df = pd.DataFrame(infos)
-        df.to_csv(os.path.join(self.path_outputs, self.name_wsi + '_infos.csv'), index=False)
-        np.save(os.path.join(self.path_outputs,self.name_wsi + '_infomat.npy'), infomat-1)
-        with open(os.path.join(self.path_outputs, self.name_wsi + '_infodict.pickle'), 'wb') as f:
+        df.to_csv(os.path.join(self.path_info, self.name_wsi + '_infos.csv'), index=False)
+        np.save(os.path.join(self.path_info, self.name_wsi + '_infomat.npy'), infomat-1)
+        with open(os.path.join(self.path_info,  self.name_wsi + '_infodict.pickle'), 'wb') as f:
             pickle.dump(infodict, f)
         self.infomat = infomat -1
         self.prediction_map = np.zeros(infomat.shape) - 1
@@ -226,7 +229,7 @@ class ImageTiler:
             patch = patch.convert('RGB')
             name_wsi = os.path.splitext(os.path.basename(self.path_wsi))[0]
             new_name =  "{}_{}.jpg".format(name_wsi, o)
-            patch.save(os.path.join(self.path_outputs, new_name))
+            patch.save(os.path.join(self.path_outputs,'simple', self.name_wsi, new_name))
             del patch
 
     def imagenet_tiler(self, param_tiles):

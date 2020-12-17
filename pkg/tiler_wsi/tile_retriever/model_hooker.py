@@ -32,7 +32,7 @@ class HookerMIL:
             hooks the output of the attention heads
             """ 
             tiles_weights = o
-            tiles_weights.view(-1, self.num_heads)
+            tiles_weights = tiles_weights.view(-1, self.num_heads)
             self.tiles_weights = tiles_weights.detach().cpu().numpy()
         return hook_attention
 
@@ -42,7 +42,7 @@ class HookerMIL:
             i.e the different average tiles
             """ 
             repre = i[0].view(self.num_heads, -1) 
-            self.head_average = repre.squeeze().detach().cpu().numpy()
+            self.head_average = repre.detach().cpu().numpy()
         return hook_head_average
 
     def _get_wsi_representation_hook(self):

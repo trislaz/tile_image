@@ -1,27 +1,37 @@
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+from sklearn import preprocessing
+import seaborn as sns
 import numpy as np; np.random.seed(42)
+from argparse import ArgumentParser
 import os
 import pandas as pd
 import os; from glob import glob; import numpy as np; import pickle; import matplotlib.pyplot as plt; import seaborn as sns; import pandas as pd; import umap
 
-def main():
-    projection = np.load('projection_coordinates.npy')
+def main(mean_tile):
+    le = preprocessing.LabelEncoder()
+    projection = np.load('projection_reprewsi.npy')
     names = np.load('names.npy')
-    labels = np.load('labels.npy')
+    labels = np.load('labels.npy') #le.fit_transform(np.load('labels.npy'))
     ## Arrange the jpg_name_np as for the scatter plot.
     cmap = plt.cm.RdYlGn
     
     # create figure and plot scatter
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    line = ax.scatter(x=projection[:,0], y=projection[:,1], c=labels, s=40)
-    image_path = np.asarray(['representants/{}.png'.format(x) for x in names])
+    line = sns.scatterplot(x=projection[:,0], y=projection[:,1], hue=labels, s=40, ax=ax)
+    line = line.collections[0]
+#    line = ax.scatter(x=projection[:,0], y=projection[:,1], c=labels, s=40)
+    if mean_tile:
+        directory = 'representants'
+    else:
+        directory = 'best_tiles'
+    image_path = np.asarray(['{}/{}.png'.format(directory, x) for x in names])
     
     # create the annotations box
     image = plt.imread(image_path[0])
-    im = OffsetImage(image, zoom=0.6)
-    xybox=(80., 80.)
+    im = OffsetImage(image, zoom=0.7)
+    xybox=(120., 120.)
     ab = AnnotationBbox(im, (0,0), xybox=xybox, xycoords='data',
             boxcoords="offset points",  pad=0.3,  arrowprops=dict(arrowstyle="->"))
     # add it to the axes and make it invisible
@@ -44,7 +54,7 @@ def main():
             # make annotation box visible
             ab.set_visible(True)
             # place it at the position of the hovered scatter point
-            ab.xy =(th[ind,0], th[ind, 1])
+            ab.xy =(projection[ind,0], projection[ind, 1])
             # set the image corresponding to that point
             im.set_data(plt.imread(image_path[ind]))
         else:
@@ -53,11 +63,15 @@ def main():
         fig.canvas.draw_idle()
     
     # add callback for mouse moves
+ #   fig.canvas.mpl_connect('button_press_event', hover)  
     fig.canvas.mpl_connect('motion_notify_event', hover)  
-    
     fig = plt.gcf()
     fig.set_size_inches(10.5, 9.5)
     plt.show() 
 
 if __name__ == '__main__':
-    main()
+
+    parser=ArgumentParser()
+    parser.add_argument('--mean_tile', action='store_true', help='images are mean tiles')
+    args = parser.parse_args()
+    main(mean_tile=args.mean_tile)

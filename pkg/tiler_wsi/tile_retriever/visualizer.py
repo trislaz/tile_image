@@ -12,7 +12,7 @@ from copy import copy
 import numpy as np
 import pickle
 import pandas as pd
-from model_hooker import HookerMIL
+from .model_hooker import HookerMIL
 import os 
 
 def make_background_neutral(heatmap):
@@ -23,7 +23,6 @@ def make_background_neutral(heatmap):
     heatmap_neutral = copy(heatmap)
     heatmap_neutral[heatmap_neutral == 0] = np.mean([heatmap_neutral.max(), heatmap_neutral.min()])
     return heatmap_neutral
-
 
 class VisualizerMIL:
     """
@@ -40,7 +39,6 @@ class VisualizerMIL:
     Also compute plots
     """
     def __init__(self, model, path_raw=None, path_emb=None, table=None, level_visu=-1):
-        self.k = k
         ## Model loading
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = load_model(model, self.device)
@@ -48,13 +46,13 @@ class VisualizerMIL:
         # Par défaut on considère le dataset d'entrainement 
         # = données contenues dans args.
         if table is None:
-            table = self.model.args["table_data"]
-        if path_embed is None:
-            path_embed = self.model.args["wsi"]
+            table = self.model.args.table_data
+        if path_emb is None:
+            path_emb = self.model.args.wsi
         if path_raw is None:
-            path_raw = self.model.args["raw_path"]
+            path_raw = self.model.args.raw_path
         self.table = table
-        self.path_embed = path_embed
+        self.path_emb = path_emb
         self.path_raw = path_raw
 
         ## Model parameters
@@ -67,7 +65,7 @@ class VisualizerMIL:
         self.hooker = HookerMIL(self.model.network, self.num_heads)
         
         ## list that have to be filled with various WSI
-        self.stored = {"names":[], "heads":[], "reprewsi":[], 'label':[]}
+        self.stored = {"names":[], "heads":[], "reprewsi":[], 'label':[], 'pred':[]}
 
         self.gt = None
         self.pred = None
@@ -88,7 +86,7 @@ class VisualizerMIL:
             path_emb = self.path_emb
         self.wsi_ID = wsi_ID 
         self.info = self._get_info(wsi_ID, path_emb)
-        wsi_embedded_path = os.path.join(embeddings, 'mat_pca', wsi_ID + "_embedded.npy")
+        wsi_embedded_path = os.path.join(path_emb, 'mat_pca', wsi_ID + "_embedded.npy")
         input_wsi = self._preprocess(wsi_embedded_path)
         _, pred = self.model.predict(input_wsi)
         self.gt = self._extract_groundtruth(table=self.table, wsi_ID=wsi_ID)
@@ -108,9 +106,10 @@ class VisualizerMIL:
         self.stored['heads'].append(self.hooker.head_average)
         self.stored['reprewsi'].append(self.hooker.reprewsi)
         self.stored['label'].append(self.gt)
+        self.stored['pred'].append(self.pred)
 
     def flush_wsi_features(self):
-        self.stored = {"names":[], "heads":[], "reprewsi":[], "label":[]}
+        self.stored = {"names":[], "heads":[], "reprewsi":[], "label":[], 'pred':[]}
 
     def create_heatmap_fig(self, path_raw=None):
         if path_raw is None:
@@ -176,26 +175,33 @@ class VisualizerMIL:
         fig.tight_layout()
         return fig
 
+    def get_best_tile(self, path_raw=None, head=0):
+        if path_raw is None:
+            path_raw = self.path_raw
+        heatmap = self._get_heatmap()[:,:,head]
+        top, _ = self._get_topk_tiles(heatmap, k=1)
+        top_tile = self._get_image(path_raw, top)
+        return top_tile
+
     def _get_topk_tiles(self, heatmap, k=4):
         infomat = self.info['infomat'].flatten()
         mask = infomat > -1
-        heatmap[mask].flatten()
         heatmap = heatmap.flatten()[mask]
         indices = np.argsort(heatmap)
         topk = indices[-k:]
         lowk = indices[:k]
         topk_i = infomat[mask][topk]
         lowk_i = infomat[mask][lowk]
-        return topk, lowk
+        return topk_i, lowk_i
 
-     def _get_down_image(self, wsi):
-        """get the downsampled image (numpy format) at the desired downsampling factor.
-        """
-        self.wsi = usi.open_image(wsi)
-        if self.level_visu < 0:
-            self.level_visu = self.wsi.level_count + self.level_visu
-        image = usi.get_whole_image(self.wsi, level=self.level_visu, numpy=True)
-        return image
+    def _get_down_image(self, wsi):
+       """get the downsampled image (numpy format) at the desired downsampling factor.
+       """
+       self.wsi = usi.open_image(wsi)
+       if self.level_visu < 0:
+           self.level_visu = self.wsi.level_count + self.level_visu
+       image = usi.get_whole_image(self.wsi, level=self.level_visu, numpy=True)
+       return image
         
     def _preprocess(self, input_path):
         """preprocess the input to feed the model
@@ -220,8 +226,8 @@ class VisualizerMIL:
         for o, i in enumerate(infomat):
             if i > 0:
                 for nh in range(self.num_heads):
-                    heatmap[o, :] = self.tiles_weights[int(i), :]
-        heatmaps = heatmap.reshape(size)
+                    heatmaps[o, nh] = tiles_weights[int(i), nh]
+        heatmaps = heatmaps.reshape(size)
         return heatmaps
 
     def _get_info(self, wsi_ID, path_emb):
@@ -231,39 +237,41 @@ class VisualizerMIL:
         infomat = infomat.T 
         with open(os.path.join(wsi_info_path, wsi_ID+ '_infodict.pickle'), "rb") as f:
             infodict = pickle.load(f)
-        return {'infomat':infomat, 'paradict': infodict , 'paralist': self._infodict_to_list(infodict)}
+        return {'infomat':infomat, 'paradict': infodict , 'paralist': [self._infodict_to_list(infodict[x]) for x in infodict]}
 
     def _get_image(self, raw_path, indice):
-        para = self.info['paratiles'][indice]
-        image = usi.get_image(slide=os.path.join(self.raw_path, self.wsi_ID), 
-                para=paras, numpy=True)
+        # TODO Change the loader to get rid of usi.
+        para = self.info['paralist'][int(indice.item())]
+        image = usi.get_image(slide=os.path.join(self.path_raw, self.wsi_ID+'.ndpi'), 
+                para=para, numpy=False)
         return image
 
-   def _plot_loc_tile(self, ax, color, para):
-        args_patch = {'color':color, 'fill': False, 'lw': 5}
-        top_left_x, top_left_y = usi.get_x_y_from_0(self.wsi, (para['x'], para['y']), self.level_visu)
-        width, height = usi.get_size(self.wsi, (para['xsize'], para['ysize']), para['level'], self.level_visu)
-        plot_seed = (top_left_x, top_left_y)
-        patch = patches.Rectangle(plot_seed, width, height, **args_patch)
-        ax.add_patch(patch)
+    def _plot_loc_tile(self, ax, color, para):
+         args_patch = {'color':color, 'fill': False, 'lw': 5}
+         top_left_x, top_left_y = usi.get_x_y_from_0(self.wsi, (para['x'], para['y']), self.level_visu)
+         width, height = usi.get_size(self.wsi, (para['xsize'], para['ysize']), para['level'], self.level_visu)
+         plot_seed = (top_left_x, top_left_y)
+         patch = patches.Rectangle(plot_seed, width, height, **args_patch)
+         ax.add_patch(patch)
   
-     def _infodict_to_list(dictio):
-        """Interface to use ùseful_wsi`that needs a list for parameter
-        Because this is how have been implemented the tiling by peter
+    @staticmethod
+    def _infodict_to_list(dictio):
+       """Interface to use ùseful_wsi`that needs a list for parameter
+       Because this is how have been implemented the tiling by peter
 
-        Args:
-            dictio (dict): my parameter dict (x, y, xsize, ysize, level)
+       Args:
+           dictio (dict): my parameter dict (x, y, xsize, ysize, level)
 
-        Returns:
-            list: list of parameters, in the good order.
-        """
-        para = []
-        para.append(dictio['x'])
-        para.append(dictio['y'])
-        para.append(dictio['xsize'])
-        para.append(dictio['ysize'])
-        para.append(dictio['level'])
-        return para
+       Returns:
+           list: list of parameters, in the good order.
+       """
+       para = []
+       para.append(dictio['x'])
+       para.append(dictio['y'])
+       para.append(dictio['xsize'])
+       para.append(dictio['ysize'])
+       para.append(dictio['level'])
+       return para
 
     def _make_message(self,pred):
         if self.result_pred is '':
@@ -280,7 +288,6 @@ class VisualizerMIL:
                 return "No table"
         if wsi_ID in table['ID'].values:
             gt = table[table['ID'] == wsi_ID][self.target_name].values[0]
-            gt = self.model.target_correspondance[gt]
         else:
             return "not in table"
         return gt
