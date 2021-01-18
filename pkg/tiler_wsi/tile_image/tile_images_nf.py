@@ -2,7 +2,7 @@
 import useful_wsi as usi
 from glob import glob
 from argparse import ArgumentParser
-from torchvision.models import resnet50, resnet18
+from torchvision.models import resnet50, resnet18, resnext50_32x4d
 from torchvision import transforms
 from torch.nn import Identity
 import torch
@@ -124,6 +124,7 @@ def make_label_with_otsu(xml_file, rgb_img):
 class ImageTiler:
     def __init__(self, args, make_info=True, nf=True):
         self.level = args.level # Level to which sample patch.
+        self.use_nf = nf # Useful for managing the outputs
         self.sampling_method = 'grid'# grid
         self.n_samples = 15 # pour les slides 0.
         self.device = args.device
@@ -223,13 +224,21 @@ class ImageTiler:
         self.infomat = infomat -1
         self.prediction_map = np.zeros(infomat.shape) - 1
    
+    def get_new_path(self, name, subfolder):
+       if self.use_nf:
+           return os.path.join('.', name)
+       else:
+           return os.path.join(self.path_outputs, subfolder, name)
+
+
     def simple_tiler(self, param_tiles):
         for o, para in enumerate(param_tiles):
             patch = usi.get_image(slide=self.path_wsi, para=para, numpy=False)
             patch = patch.convert('RGB')
             name_wsi = os.path.splitext(os.path.basename(self.path_wsi))[0]
             new_name =  "{}_{}.jpg".format(name_wsi, o)
-            patch.save(os.path.join(self.path_outputs,'simple', self.name_wsi, new_name))
+            new_path = self.get_new_path(new_name, 'simple')
+            patch.save(new_path)
             del patch
 
     def imagenet_tiler(self, param_tiles):
@@ -325,7 +334,11 @@ class ImageTiler:
         if not imagenet:
             if self.size[0] == 256:
                 trans = transforms.Compose([transforms.ToTensor(),
-                    transforms.Normalize([0.753, 0.584,  0.706], [0.128, 0.157, 0.122])])
+                    transforms.Normalize([0.753, 0.584,  0.706], [0.128, 0.157, 0.122])])  
+            elif self.size[0] == 224:
+                print('ok_norm')
+                trans = transforms.Compose([transforms.ToTensor(),
+                    transforms.Normalize([0.747, 0.515,  0.70], [0.145, 0.209, 0.154])])
             elif self.size[0] == 512:
                 trans = transforms.Compose([transforms.ToTensor(), 
                     transforms.Normalize([0.763, 0.602, 0.718], [0.134, 0.174, 0.131])])
@@ -335,7 +348,8 @@ class ImageTiler:
         return trans
 
     def moco_tiler(self, param_tiles):
-        model = resnet18()
+        #model = resnet18()
+        model = resnext50_32x4d()
         checkpoint = torch.load(self.model_path, map_location='cpu')
         # rename moco pre-trained keys
         state_dict = checkpoint['state_dict']

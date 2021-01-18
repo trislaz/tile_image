@@ -1,5 +1,6 @@
 from deepmil.predict import load_model
 import matplotlib.pyplot as plt
+import skimage
 from scipy.ndimage import rotate, distance_transform_bf
 import matplotlib.patches as patches
 import torch
@@ -23,6 +24,14 @@ def make_background_neutral(heatmap):
     heatmap_neutral = copy(heatmap)
     heatmap_neutral[heatmap_neutral == 0] = np.mean([heatmap_neutral.max(), heatmap_neutral.min()])
     return heatmap_neutral
+
+def add_titlebox(ax, text):
+    ax.text(.05, .05, text,
+        horizontalalignment='left',
+        transform=ax.transAxes,
+        bbox=dict(facecolor='white', alpha=0.8),
+        fontsize=25)
+    return ax
 
 class VisualizerMIL:
     """
@@ -65,7 +74,7 @@ class VisualizerMIL:
         self.hooker = HookerMIL(self.model.network, self.num_heads)
         
         ## list that have to be filled with various WSI
-        self.stored = {"names":[], "heads":[], "reprewsi":[], 'label':[], 'pred':[]}
+        self.stored = {"names":[], "heads":[], "reprewsi":[], 'label':[], 'pred':[], 'tiles_weights':[]}
 
         self.gt = None
         self.pred = None
@@ -94,6 +103,26 @@ class VisualizerMIL:
         self.store_wsi_features()
         return pred
 
+    def create_masks(self, N=500, head=0):
+        """create_masks.
+
+        Creates binary masks in order to sample at higher resolution.
+        must follow a forward pass.
+
+        :param N: number of tiles at the higher resolution
+        :param head: attention head to use to class the tiles.
+        """
+        ## Making the heatmaps
+        heatmap = self._get_heatmap()
+        heatmap = heatmap[:,:,head]
+        indices = np.argsort(heatmap.flatten())
+        mask = np.zeros(len(heatmap.flatten()))
+        mask[indices[-N:]] = 1
+        mask = mask.reshape(heatmap.shape)
+        image = self._get_down_image(os.path.join(self.path_raw,self.wsi_ID))
+        mask_up = skimage.transform.resize(mask, image[:,:,0].shape)
+        return mask_up
+        
     def make_visu(self, figtypes:str, wsi_ID:str, path_emb:str, path_raw:str, head=1):
         pred = self.forward_pass(wsi_ID, path_emb)
         figs = {}
@@ -107,14 +136,15 @@ class VisualizerMIL:
         self.stored['reprewsi'].append(self.hooker.reprewsi)
         self.stored['label'].append(self.gt)
         self.stored['pred'].append(self.pred)
+        self.stored['tiles_weights'].append(self.hooker.tiles_weights)
 
     def flush_wsi_features(self):
-        self.stored = {"names":[], "heads":[], "reprewsi":[], "label":[], 'pred':[]}
+        self.stored = {"names":[], "heads":[], "reprewsi":[], "label":[], 'pred':[], 'tiles_weights':[]}
 
     def create_heatmap_fig(self, path_raw=None):
         if path_raw is None:
-            self.path_raw = path_raw
-        heatmaps = self._get_heatmaps()
+            path_raw = self.path_raw
+        heatmaps = self._get_heatmap()
         num_heads = self.num_heads
         num_cases = round((num_heads + 1)/2)+1
         gridsize = (num_cases, 2)
@@ -122,15 +152,15 @@ class VisualizerMIL:
         for nh in range(num_heads):
             r = nh // 2
             c = nh % 2
-            heatarray = self.make_background_neutral(heatmaps[:,nh])
+            heatarray = make_background_neutral(heatmaps[:,:,nh])
             heatmap = plt.subplot2grid(gridsize, (r, c), rowspan=1, colspan=1, fig=fig)
             hm = heatmap.imshow(heatarray, cmap='coolwarm', vmin=heatarray.min())
             heatmap.set_title('Scores')
             heatmap.set_axis_off()
         visu = plt.subplot2grid(gridsize, (int(((num_heads+1)/2)//2)+1, int(((num_heads+1)/2)%2)), rowspan=1, colspan=1, fig=fig)
-        visu.imshow(self._get_down_image(os.path.join(path_raw, wsi_ID)))
+        visu.imshow(self._get_down_image(os.path.join(self.path_raw, self.wsi_ID)))
         visu.set_axis_off()
-        add_titlebox(visu, self._make_message())
+        add_titlebox(visu, self._make_message(self.pred))
         fig.tight_layout()
         return fig
 
@@ -142,8 +172,8 @@ class VisualizerMIL:
                           patches.Patch(facecolor=color_tile[1], edgecolor='black', label='Lowest scores')]
 
         ## Making the heatmaps
-        heatmaps = self._get_heatmaps()
-        heatmap = heatmap[:,head]
+        heatmap = self._get_heatmap()
+        heatmap = heatmap[:,:,head]
 
         assert self.images['topk'] is not None, "You have to first self.get_images"
         gridsize = (6, 4)
@@ -197,7 +227,7 @@ class VisualizerMIL:
     def _get_down_image(self, wsi):
        """get the downsampled image (numpy format) at the desired downsampling factor.
        """
-       self.wsi = usi.open_image(wsi)
+       self.wsi = usi.open_image(wsi+'.svs')
        if self.level_visu < 0:
            self.level_visu = self.wsi.level_count + self.level_visu
        image = usi.get_whole_image(self.wsi, level=self.level_visu, numpy=True)
@@ -242,7 +272,7 @@ class VisualizerMIL:
     def _get_image(self, raw_path, indice):
         # TODO Change the loader to get rid of usi.
         para = self.info['paralist'][int(indice.item())]
-        image = usi.get_image(slide=os.path.join(self.path_raw, self.wsi_ID+'.ndpi'), 
+        image = usi.get_image(slide=os.path.join(self.path_raw, self.wsi_ID+'.svs'), 
                 para=para, numpy=False)
         return image
 
@@ -273,8 +303,8 @@ class VisualizerMIL:
        para.append(dictio['level'])
        return para
 
-    def _make_message(self,pred):
-        if self.result_pred is '':
+    def _make_message(self, pred):
+        if pred is '':
             msg = "Prediction of {} : {}.".format(self.target_name, pred)
         else:
             msg = "Prediction of {} : {}. Ground truth: {}".format(self.target_name, pred, self.gt)
