@@ -13,6 +13,7 @@ def main(mean_tile):
     projection = np.load('projection_reprewsi.npy')
     names = np.load('names.npy')
     labels = np.load('labels.npy') #le.fit_transform(np.load('labels.npy'))
+    preds = np.load('preds.npy')
     ## Arrange the jpg_name_np as for the scatter plot.
     cmap = plt.cm.RdYlGn
     
@@ -26,7 +27,7 @@ def main(mean_tile):
         directory = 'representants'
     else:
         directory = 'best_tiles'
-    image_path = np.asarray(['{}/{}.png'.format(directory, x) for x in names])
+    image_path = np.asarray(['{}/{}_{}.png'.format(directory, preds[o], x) for o,x in enumerate(names)])
     
     # create the annotations box
     image = plt.imread(image_path[0])

@@ -27,8 +27,8 @@ class TileSampler:
         self.mask = self.infomat >= 0
         self.total_tiles = self.mask.sum()
         # is necessary to apply 0 to the border so that background is always surrounding the image.
-        self.mask = self._force_background(self.mask)
-        self.dist = distance_transform_bf(self.mask)
+        #self.mask = self._force_background(self.mask)
+        #self.dist = distance_transform_bf(self.mask)
         path_infodict = os.path.join(info_folder, name_wsi + '_infodict.pickle')
         with open(path_infodict, 'rb') as f:
             self.infodict = pickle.load(f)

@@ -175,11 +175,10 @@ class VisualizerMIL:
         heatmap = self._get_heatmap()
         heatmap = heatmap[:,:,head]
 
-        assert self.images['topk'] is not None, "You have to first self.get_images"
         gridsize = (6, 4)
         fig = plt.figure(figsize=(30, 20))
         visu = plt.subplot2grid(gridsize, (2, 0), rowspan=2, colspan=2, fig=fig)
-        visu.imshow(self.images['wsi_down'])
+        visu.imshow(self._get_down_image(os.path.join(self.path_raw, self.wsi_ID)))
         visu.set_axis_off()
         hm_ax = plt.subplot2grid(gridsize, (2, 2), rowspan=2, colspan=2, fig=fig)
         hm = hm_ax.imshow(self.make_background_neutral(heatmap), cmap='coolwarm')
@@ -227,7 +226,7 @@ class VisualizerMIL:
     def _get_down_image(self, wsi):
        """get the downsampled image (numpy format) at the desired downsampling factor.
        """
-       self.wsi = usi.open_image(wsi+'.svs')
+       self.wsi = usi.open_image(wsi+'.ndpi')
        if self.level_visu < 0:
            self.level_visu = self.wsi.level_count + self.level_visu
        image = usi.get_whole_image(self.wsi, level=self.level_visu, numpy=True)
@@ -272,7 +271,7 @@ class VisualizerMIL:
     def _get_image(self, raw_path, indice):
         # TODO Change the loader to get rid of usi.
         para = self.info['paralist'][int(indice.item())]
-        image = usi.get_image(slide=os.path.join(self.path_raw, self.wsi_ID+'.svs'), 
+        image = usi.get_image(slide=os.path.join(self.path_raw, self.wsi_ID+'.ndpi'), 
                 para=para, numpy=False)
         return image
 
