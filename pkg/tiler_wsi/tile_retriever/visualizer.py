@@ -181,7 +181,7 @@ class VisualizerMIL:
         visu.imshow(self._get_down_image(os.path.join(self.path_raw, self.wsi_ID)))
         visu.set_axis_off()
         hm_ax = plt.subplot2grid(gridsize, (2, 2), rowspan=2, colspan=2, fig=fig)
-        hm = hm_ax.imshow(self.make_background_neutral(heatmap), cmap='coolwarm')
+        hm = hm_ax.imshow(make_background_neutral(heatmap), cmap='coolwarm')
         heatmap.set_title('Scores')
         fig.colorbar(hm, ax=hm_ax)
         heatmap.set_axis_off()
