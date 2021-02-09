@@ -1,5 +1,7 @@
 from deepmil.predict import load_model
+from openslide import open_slide 
 import matplotlib.pyplot as plt
+from abc import ABC, abstractmethod
 import skimage
 from scipy.ndimage import rotate, distance_transform_bf
 import matplotlib.patches as patches
@@ -33,6 +35,58 @@ def add_titlebox(ax, text):
         fontsize=25)
     return ax
 
+class BaseVisualizer(ABC):
+    def __init__(self, model):
+        ## Model loading
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = load_model(model, self.device)
+        self.net = self.model.network.classifier
+        self.target_correspondance = self.model.args.target_correspondance
+
+        # Par défaut on considère le dataset d'entrainement 
+        # = données contenues dans args.
+        self.table = self.model.args.table_data
+        self.path_emb = self.model.args.wsi
+        self.path_raw = self.model.args.raw_path
+        self.num_classes = self.model.args.num_classes
+
+    def _get_info(self, wsi_ID, path_emb):
+        wsi_info_path = os.path.join(path_emb, 'info')
+        infomat = os.path.join(wsi_info_path, wsi_ID + '_infomat.npy')
+        infomat = np.load(infomat)
+        infomat = infomat.T 
+        with open(os.path.join(wsi_info_path, wsi_ID+ '_infodict.pickle'), "rb") as f:
+            infodict = pickle.load(f)
+            infodict['name'] = wsi_ID
+        return {'infomat':infomat, 'paradict': infodict , 'paralist': [self._infodict_to_list(infodict[x]) for x in infodict]}
+
+    def _get_image(self, path_raw, info):
+        """_get_image.
+        extract the indice-ieme tile of the wsi stored at path_raw.
+        returns PIL image.
+
+        :param path_raw: path to te wsi (all extensions accepted)
+        :param indice: number of the tile in the flattened WSI
+        """
+        param = info
+        path_wsi = glob(os.path.join(self.path_raw, param['name'] + '.*'))
+        assert path_wsi, "no wsi with name {}".format(param['name'])
+        assert len(path_wsi)<2, "several wsi with name {}".format(param['name'])
+        slide = open_slide(path_wsi[0])
+        image = slide.read_region(location=(param['x'], param['y']),
+                                level=param['level'], 
+                                size=(param['xsize'], param['ysize']))
+        return image
+
+    def set_data_path(self, path_raw, path_emb):
+        self.path_raw = path_raw 
+        self.path_emb = path_emb
+
+    @abstractmethod
+    def forward(self, x):
+        pass
+
+# TODO reimplement using the BaseVisualizer class
 class VisualizerMIL:
     """
     Class that allows the hook and storage of MIL features during a forward pass.
@@ -321,3 +375,83 @@ class VisualizerMIL:
             return "not in table"
         return gt
  
+class TileSeeker(BaseVisualizer):
+    """
+    Seeks for the best tile scoring tile according to one class.
+    """
+    def __init__(self, model, n_best):
+        super(TileSeeker, self).__init__(model)
+        self.net = self.model.network.classifier
+        self.n_best = n_best
+
+        ## Model parameters
+        assert self.model.args.num_heads == 1, 'you can\'t extract a best tile when using the multiheaded attention'
+        self.model_name = self.model.args.model_name
+        self.target_name = self.model.args.target_name
+
+        ## list that have to be filled with various WSI
+        self.store_info = None
+        self.store_score = None
+        self.store_images = None
+        self._reset_storage()
+
+    def forward(self, wsi_ID):
+        """forward.
+        Execute a forward pass through the MLP classifier. 
+        Stores the n-best tiles for each class.
+        :param wsi_ID: wsi_ID as appearing in the table_data.
+        """
+        x = os.path.join(self.path_emb, wsi_ID+'_embedded.npy')
+        info = self._get_info(wsi_ID, path_emb=self.path_emb)
+        x = x.to(self.device)
+        out = self.net(x) # (bs, n_class)
+        self.store_best(out, info)
+
+    def store_best(self, out, info):
+        """store_best.
+        decides if we have to store the tile, according the final activation value.
+
+        :param sorted_out: out of a forward parss
+        """
+        # for each tile
+        for s in out.shape[0]: 
+            # for each class
+            for o in range(out.shape[1]):
+                # If the score for class o at tile s is bigger than the smallest 
+                # stored value: put in storage
+                if not self.store_score or (out[s,o] > self.store_score[o][0]):
+                    self.store_info[o].append(info['infodict'][s])
+                    self.store_score[o].append(out[s,o])
+
+        #trie et enleve les plus bas
+        for o in range(out.shape[1]):
+            indices_best = np.argsort(self.store_score[o])[-self.n_best:]
+            self.store_score[o] = list(np.array(self.store_score[o])[indices_best])
+            self.store_info[o] = list(np.array(self.store_info[o])[indices_best])
+                
+    def _reset_storage(self):
+        """_reset_storage.
+        Reset the storage dict.
+        store_score and store info are dict with keys the classes (ordinals)
+        containing empty lists. When filled, they are supposed to n_best scores 
+        and infodicts values.
+        only store images as the name of the targets as keys. 
+        Advice : fill store image at the end only.
+        """
+        self.store_score = dict()
+        self.store_info = dict()
+        self.store_images = dict()
+        for o,i in enumerate(self.target_correspondance):
+            self.store_info[o] = []
+            self.store_score[o] = []
+            self.store_image[i] = []
+
+
+
+    
+
+
+
+
+
+
