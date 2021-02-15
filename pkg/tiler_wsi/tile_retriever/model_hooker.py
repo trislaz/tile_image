@@ -14,7 +14,7 @@ import pickle
 import pandas as pd
 import os 
 
-class HookerMIL:
+class HookerMIL: 
     """
     Manage the hooks for the MIL algorithm.
     """
@@ -25,6 +25,7 @@ class HookerMIL:
         #Possibly filled attribute
         self.tiles_weights = None
         self.head_average = None
+        self.scores = None
 
     def _get_attention_hook(self):
         def hook_attention(m, i, o):
@@ -35,6 +36,15 @@ class HookerMIL:
             tiles_weights = tiles_weights.view(-1, self.num_heads)
             self.tiles_weights = tiles_weights.detach().cpu().numpy()
         return hook_attention
+
+    def _get_outputs_hook(self):
+        def hook_output(m, i, o):
+            """Hooks the outputs of the classifier, before the 
+            logsoftmax layer(expected to saturate).
+            """
+            repre = i[0] 
+            self.scores = repre.detach().cpu().numpy()
+        return hook_output
 
     def _get_average_hook(self):
         def hook_head_average(m, i, o):
@@ -59,7 +69,7 @@ class HookerMIL:
             if list(layer.children()):
                 self.place_hooks(layer)
             if name == 'attention':
-                hook_layer = list(layer.children())[0]
+                hook_layer = list(layer.children())[-1]
                 hook_layer.register_forward_hook(self._get_attention_hook())
                 print('Hook in place, captain')
             if name == 'classifier':
@@ -67,6 +77,8 @@ class HookerMIL:
                 hook_layer.register_forward_hook(self._get_average_hook())
                 layer_reprewsi = list(layer.children())[-2]
                 layer_reprewsi.register_forward_hook(self._get_wsi_representation_hook())
+                layer_scores = list(layer.children())[-1]
+                layer_scores.register_forward_hook(self._get_outputs_hook())
 
 
 

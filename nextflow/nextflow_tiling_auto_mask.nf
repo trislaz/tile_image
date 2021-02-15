@@ -7,78 +7,66 @@
 // ------------------------------------------------------------------------------
 
 ext = "ndpi"
-input_path = "/mnt/data4/tlazard/data/curie/curie_recolo_raw"
-output_path = "/mnt/data4/tlazard/data/curie/curie_recolo_tiled"
-level_mask = -1
+input_path = "/gpfsstore/rech/gdg/uub32zv/essai"
+root_out = "/gpfsstore/rech/gdg/uub32zv/essai_tiled"
 level_sampling = 1
-size = 256 
-tiler = 'imagenet'  // dispo : simple | imagenet
+size = 224 
+tiler = 'imagenet'  // dispo : simple | imagenet | moco
+model_path = '/path/to/moco/model' 
+clusteropt_gpu = '--account=gdg@gpu --gres=gpu:1'
+clusteropt_cpu = '--account=gdg@gpu -p prepost'
 
 // ------------------------------------------------------------------------------ 
 
-input_wsi = Channel.fromPath(input_path + "/*.${ext}", type: 'file')
+input_wsi = Channel.from([input_path])
+level_mask = -1
 
-process Downsample{
-    publishDir "${output_path}/down", overwrite: true, mode: 'copy'
+process Mask{
+    publishDir "${root_out}/masks", overwrite: true, mode: 'copy'
+    clusterOptions clusteropt_cpu
+	memory '40GB'
+    time '30min'
+
 
     input:
-    val image from input_wsi
+    val path from input_wsi
 
     output:
-    file('*.jpg') into downsampled
+    file('*.npy')
+    val(1) into masked
 
     script:
-    python_script = file("./downsize.py")
+    python_script = file("../scripts/make_masks.py")
     """
-    python ${python_script} --path ${image} --level ${level_mask}
-    echo ${level_mask} > level_down.txt
+    python ${python_script} --path ${path} --level_mask ${level_mask}
     """
 }
 
-downsampled .map{ file -> tuple(file.baseName, file)}
-
-process CreateMasks {
-    publishDir "${output_path}/annot/auto_visu", pattern: "*_visu.jpg", overwrite: true, mode: 'copy'
-    publishDir "${output_path}/annot/auto", pattern: "*.npy", overwrite: true, mode: 'copy'
-
-    input:
-    tuple val(imageID), file(image) from downsampled
-
-    output:
-    tuple val(imageID), file("${imageID}.npy") into masks
-	file('*_visu.jpg')
-
-    script:
-    python_script = file('create_auto_mask.py')
-    """
-    python ${python_script} --image ${image}
-    """
-}
+masked .last() .set{mask_done}
 
 auto_mask = 1
 glob_wsi = "${input_path}/*.${ext}"
-path_mask = "${output_path}/annot/auto"
+path_mask = "${root_out}/masks"
 dataset = Channel.fromPath(glob_wsi)
 				 .map { file -> tuple(file.baseName, file) } 
 				 .into { dataset_1; dataset_2}
+dataset_1 .combine(mask_done)
+            .set{dataset_rdy}
 root_outputs = file("${root_out}/${tiler}/size_${size}/res_${level_sampling}/")
-
 process Tiling {
-	if (tiler == 'simple'){
-	publishDir "$root_outputs/${slideID}", overwrite: true, pattern: "*.jpg", mode: 'copy'
-	}
-	publishDir "$root_outputs/visu/", overwrite: true, pattern: "*.png", mode: 'copy'
 	publishDir "$root_outputs/mat/", overwrite:true, pattern:"*_embedded.npy", mode: 'copy'
+	publishDir "$root_outputs/visu/", overwrite: true, pattern: "*.png", mode: 'copy'
 	publishDir "$root_outputs/info/", overwrite:true, pattern: "*_infomat.npy", mode: 'copy'
 	publishDir "$root_outputs/info/", overwrite:true, pattern: "*.pickle", mode: 'copy'
 	publishDir "$root_outputs/info/", overwrite:true, pattern: "*.csv", mode: 'copy'
-	queue "gpu-cbio"
-	maxForks 10
-    clusterOptions "--gres=gpu:1"
-    memory '20GB'
+
+    clusterOptions clusteropt_gpu
+	time { 30.m * task.attempt }
+    errorStrategy 'ignore'
+	maxRetries 4
 
 	input:
-	set slideID, file(slidePath) from dataset_1
+	set val(slideID), val(slidePath), val(_) from dataset_rdy
 
 	output:
 	val slideID into out
@@ -88,86 +76,68 @@ process Tiling {
 	file('*.png')
 
 	script:
+	output_folder = file("$root_outputs/${slideID}")
 	python_script = file("../scripts/main_tiling.py")
 	"""
-	module load cuda10.0
+	module load cuda/10.0
 	python ${python_script} --path_wsi ${slidePath} \
 							--path_mask ${path_mask} \
 							--level $level_sampling \
 							--auto_mask ${auto_mask} \
 							--tiler ${tiler} \
 							--size $size \
-							--mask_level ${level_mask}
+							--mask_level ${level_mask} \
+                            --model_path ${model_path}
 	"""
 }
 
-// Normaliser et PCAiser: à faire dans un autre script NF car cela va dépendre systematiquement du dataset à utiliser.
-// Exemple : si je veux utiliser le mélance de TCGA et Curie, il faudra que je normalise sur cet ensemble.
 
 out .into{ out_1; out_2}
 out_1 .collect()
 	  .into{all_wsi_tiled_1; all_wsi_tiled_2}
-//
-if (tiler != 'simple'){
-//	process ComputeGlobalMean {
-//		publishDir "${output_folder}", overwrite: true, mode: 'copy'
-//		memory { 10.GB }
-//
-//		input:
-//		val _ from all_wsi_tiled_1
-//
-//		output:
-//		file('mean.npy')
-//
-//		script:
-//		compute_mean = file('../scripts/compute_mean.py')
-//		mat_folder = "${root_outputs}/mat/"
-//		output_folder = "${root_outputs}/mean/"
-//		"""
-//		python $compute_mean --path ${results_folder}
-//		"""
-//	}
 
-	process Incremental_PCA {
-    publishDir "${output_folder}", overwrite: true, pattern: "*.txt", mode: 'copy'
+process Incremental_PCA {
+	publishDir "${output_folder}", overwrite: true, pattern: "*.txt", mode: 'copy'
 	publishDir "${output_folder}", overwrite:true, pattern: "*.joblib", mode: 'copy'
-    memory '60GB'
-    cpus '16'
-
-    input:
-    val _ from all_wsi_tiled_2
+    clusterOptions clusteropt_cpu
     
-    output:
-    file("*.joblib") into results_PCA
+	memory '60GB'
+    time '30min'
+	cpus '4'
+
+	input:
+	val _ from all_wsi_tiled_2
+	
+	output:
+	file("*.joblib") into results_PCA
 	file("*.txt")
 
-    script:
-    output_folder = "${root_outputs}/pca/"
-	mat_folder = "${root_outputs}/mat/"
-    python_script = file("../scripts/pca_partial.py")
-    """
-    python $python_script --path ${mat_folder}
-    """
-	}
+	script:
+	output_folder = file("${root_outputs}/pca/")
+	mat_folder = "${root_outputs}"
+	python_script = file("../scripts/pca_partial.py")
+	"""
+	python $python_script --path ${mat_folder} --tiler ${tiler}
+	"""
+}
 
-	input_transform = results_PCA . combine(out_2)
+process Transform_Tiles {
+	publishDir "${output_folder}", overwrite: true, mode: 'copy'
+    clusterOptions clusteropt_cpu
+	memory '40GB'
+    time '30min'
 
-	process Transform_Tiles {
-    publishDir "${output_folder}", overwrite: true, mode: 'copy'
-    memory '20GB'
+	input:
+	file pca from results_PCA
 
-    input:
-    set file(pca), val(slideID) from input_transform
+	output:
+	file("*.npy") into transform_tiles
 
-    output:
-    file("*.npy") into transform_tiles
-
-    script:
-	output_folder = "${root_outputs}/mat_pca/"
-	path_encoded =  "$root_outputs/mat/${slideID}_embedded.npy"
-    python_script = file("../scripts/transform_tile.py")
-    """
-    python ${python_script} --path ${path_encoded} --pca $pca
-    """
-	}
+	script:
+	output_folder = file("${root_outputs}/mat_pca/")
+	path_encoded =  "${root_outputs}"
+	python_script = file("../scripts/transform_tile.py")
+	"""
+	python ${python_script} --path ${path_encoded}
+	"""
 }
