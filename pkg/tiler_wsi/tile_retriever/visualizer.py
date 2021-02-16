@@ -41,7 +41,7 @@ def add_titlebox(ax, text):
         horizontalalignment='left',
         transform=ax.transAxes,
         bbox=dict(facecolor='white', alpha=0.8),
-        fontsize=10)
+        fontsize=20)
     return ax
 
 class BaseVisualizer(ABC):
@@ -56,13 +56,24 @@ class BaseVisualizer(ABC):
 
         # Par défaut on considère le dataset d'entrainement 
         # = données contenues dans args.
-        self.table = self.model.args.table_data
+        self.table = self._load_table(self.model.table_data)
         self.path_emb = self.model.args.wsi
         self.path_raw = self.model.args.raw_path
         self.num_class = self.model.args.num_class
         self.num_heads = self.model.args.num_heads
         self.target_name = self.model.args.target_name
         self.hooker = HookerMIL(self.model.network, self.model.args.num_heads)
+
+    def _load_table(self, table):
+        warning_msg = "         Carefull :          \n"
+        warning_msg +="you are loading a table_data from path \n"
+        warning_msg +="the test attribution of data might be different \n"
+        warning_msg +="used during training.  \n"
+        warning_msg +="Performances might be overestimated."
+        if type(table) is str:
+            print(warning_msg)
+            table = pd.read_csv(table)
+        return table
 
     def _get_info(self, wsi_ID, path_emb):
         wsi_info_path = os.path.join(path_emb, 'info')
@@ -247,7 +258,7 @@ class VisualizerMIL(BaseVisualizer):
         self.forward_classifier(self.wsi_ID)
         self.store_logits_per_tiles()
         path_raw = self.path_raw
-        fig, axes = plt.subplots(self.num_class)
+        fig, axes = plt.subplots(self.num_class, figsize=(10,10))
         target_scores = np.multiply(self.hooker.scores, self.hooker.tiles_weights)
         for o,ax in enumerate(axes):
             target_score = target_scores[:,o]
@@ -260,7 +271,7 @@ class VisualizerMIL(BaseVisualizer):
             ax.set_axis_off()
         add_titlebox(ax, self._make_message(self.pred))
         fig.tight_layout()
-        return self
+        return fig
 
     def create_heatmap_fig(self, path_raw=None):
         if path_raw is None:
@@ -269,7 +280,7 @@ class VisualizerMIL(BaseVisualizer):
         num_heads = self.num_heads
         num_cases = round((num_heads + 1)/2)+1
         gridsize = (num_cases, 2)
-        fig, axes = plt.subplots(self.num_heads + 1)
+        fig, axes = plt.subplots(self.num_heads + 1, figsize=(10, 10))
         for o,ax in enumerate(axes):
             if o > (self.num_heads-1):
                 ax.imshow(self._get_down_image(os.path.join(self.path_raw, self.wsi_ID)))
@@ -494,7 +505,7 @@ class TileSeeker(BaseVisualizer):
         return self
 
     def forward_all(self, test=True):
-        table = pd.read_csv(self.model.args.table_data)
+        table = self.table
         test = int(self.model.args.test_fold)
         wsi_ID = table[table['test'] == test]['ID'].values
         for o in wsi_ID:

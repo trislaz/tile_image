@@ -10,7 +10,7 @@ import torch
 import numpy as np
 import pandas as pd
 
-def main(model_path:str, summary:bool, heatmaps:bool, reprewsi:bool, toptile:bool, allslides:bool, make_mask:bool):
+def main(model_path:str, summary:bool, heatmaps:bool, heatmap_target, reprewsi:bool, toptile:bool, allslides:bool, make_mask:bool):
 
     visu = VisualizerMIL(model=model_path)
     out = os.path.join(os.path.dirname(model_path),
@@ -20,34 +20,45 @@ def main(model_path:str, summary:bool, heatmaps:bool, reprewsi:bool, toptile:boo
         os.makedirs(os.path.join(out, 'best_tiles'), exist_ok=True)
     if make_mask:
         os.makedirs(os.path.join(out, 'masks'), exist_ok=True)
+    if heatmaps:
+        os.makedirs(os.path.join(out, 'heatmap'), exist_ok=True)
+    if heatmap_target:
+        os.makedirs(os.path.join(out, 'hm_target'), exist_ok=True)
+    if summary:
+        os.makedirs(os.path.join(out, 'summary'), exist_ok=True)
+
+
     if allslides:
         IDs = glob(os.path.join(visu.path_emb,'mat_pca','*.npy'))
         IDs = [os.path.basename(x).replace('_embedded.npy', '') for x in IDs]
     else:
-        df = pd.read_csv(visu.table)
-        IDs = df['ID'].values
+        df = visu.table
+        IDs = df[df['test'] == int(visu.model.args.test_fold)]['ID'].values
     for i in IDs:
         if ',' in i:
             continue
-        try:
-            visu.forward_pass(i)
-        except:
-            print('galere sur {}'.format(i))
-            continue
+#        try:
+        visu.forward(i)
+ #       except:
+ #           print('galere sur {}'.format(i))
+ #           continue
         if toptile:
             image = visu.get_best_tile()
             image.save(os.path.join(out, 'best_tiles',str(visu.pred)+'_'+i+'.png'))
         if summary:
             fig = visu.create_summary_fig()
-            fig.savefig(os.path.join(out, 'summary'+i+'.pdf'))
+            fig.savefig(os.path.join(out, 'summary',i+'.pdf'))
             plt.close('all')
         if heatmaps:
             fig = visu.create_heatmap_fig()
-            fig.savefig(os.path.join(out, 'heatmaps'+i+'.pdf'))
+            fig.savefig(os.path.join(out, 'heatmap',i+'.jpg'))
             plt.close('all')
         if make_mask:
             mask = visu.create_masks(N=500)
             np.save(os.path.join(out, 'masks', i+'.npy'), mask)
+        if heatmap_target:
+            fig = visu.create_heatmap_target_fig()
+            fig.savefig(os.path.join(out, 'hm_target', i+'.jpg'))
 
     ## Créer les tiles_representatives + umap:
     if reprewsi:
@@ -88,11 +99,13 @@ if __name__ == "__main__":
     parser.add_argument('--toptile', action='store_true')
     parser.add_argument('--allslides', action='store_true')
     parser.add_argument('--make_mask', action='store_true')
+    parser.add_argument('--heatmap_target', action='store_true')
     args = parser.parse_args()
     
     main(model_path=args.model_path,
             summary=args.summary,
-            heatmaps=args.heatmaps, 
+            heatmaps=args.heatmaps,
+            heatmap_target=args.heatmap_target,
             toptile=args.toptile,
             allslides=args.allslides,
             make_mask=args.make_mask,
