@@ -17,7 +17,11 @@ def main(model_path:str, summary:bool, heatmaps:bool, heatmap_target, reprewsi:b
             'summaries_{}'.format(os.path.basename(model_path).replace('.pt.tar', '')))
     os.makedirs(out, exist_ok=True)
     if toptile:
-        os.makedirs(os.path.join(out, 'best_tiles'), exist_ok=True)
+        Best_emb = []
+        Worst_emb = []
+        os.makedirs(os.path.join(out, 'toptiles'), exist_ok=True)
+        os.makedirs(os.path.join(out, 'toptiles/worst'), exist_ok=True)
+        os.makedirs(os.path.join(out, 'toptiles/best'), exist_ok=True)
     if make_mask:
         os.makedirs(os.path.join(out, 'masks'), exist_ok=True)
     if heatmaps:
@@ -34,7 +38,7 @@ def main(model_path:str, summary:bool, heatmaps:bool, heatmap_target, reprewsi:b
     else:
         df = visu.table
         IDs = df[df['test'] == int(visu.model.args.test_fold)]['ID'].values
-    for i in IDs:
+    for o,i in enumerate(IDs):
         if ',' in i:
             continue
 #        try:
@@ -43,8 +47,12 @@ def main(model_path:str, summary:bool, heatmaps:bool, heatmap_target, reprewsi:b
  #           print('galere sur {}'.format(i))
  #           continue
         if toptile:
-            image = visu.get_best_tile()
-            image.save(os.path.join(out, 'best_tiles',str(visu.pred)+'_'+i+'.png'))
+            print(i)
+            best, worst, best_emb, worst_emb = visu.get_best_tile()
+            Best_emb.append(best_emb)
+            Worst_emb.append(worst_emb)
+            best.save(os.path.join(out, 'toptiles/best','{}_'.format(o)+str(visu.pred)+'_'+i+'.png'))
+            worst.save(os.path.join(out, 'toptiles/worst','{}_'.format(o)+str(visu.pred)+'_'+i+'.png'))
         if summary:
             fig = visu.create_summary_fig()
             fig.savefig(os.path.join(out, 'summary',i+'.pdf'))
@@ -54,12 +62,15 @@ def main(model_path:str, summary:bool, heatmaps:bool, heatmap_target, reprewsi:b
             fig.savefig(os.path.join(out, 'heatmap',i+'.jpg'))
             plt.close('all')
         if make_mask:
-            mask = visu.create_masks(N=500)
+            mask = visu.create_masks(N=100)
             np.save(os.path.join(out, 'masks', i+'.npy'), mask)
         if heatmap_target:
             fig = visu.create_heatmap_target_fig()
             fig.savefig(os.path.join(out, 'hm_target', i+'.jpg'))
 
+    if toptile:
+        np.save(os.path.join(out, 'toptiles/best_embedded.npy'), np.vstack(Best_emb))
+        np.save(os.path.join(out, 'toptiles/worst_embedded.npy'), np.vstack(Best_emb))
     ## Créer les tiles_representatives + umap:
     if reprewsi:
         tile_repre = TileRepresentant(visu.path_emb, visu.path_raw, N=1000)

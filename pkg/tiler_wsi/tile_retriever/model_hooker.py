@@ -69,7 +69,7 @@ class HookerMIL:
             if list(layer.children()):
                 self.place_hooks(layer)
             if name == 'attention':
-                hook_layer = list(layer.children())[-1]
+                hook_layer = list(layer.children())[-2]
                 hook_layer.register_forward_hook(self._get_attention_hook())
                 print('Hook in place, captain')
             if name == 'classifier':

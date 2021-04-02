@@ -187,6 +187,7 @@ class VisualizerMIL(BaseVisualizer):
         wsi_embedded_path = os.path.join(self.path_emb, 'mat_pca', wsi_ID + "_embedded.npy")
         input_wsi = self._preprocess(wsi_embedded_path, expand_bs=True)
         _, pred = self.model.predict(input_wsi)
+        self.input_wsi = input_wsi.detach().squeeze().cpu().numpy()
         self.gt = self._extract_groundtruth(table=self.table, wsi_ID=wsi_ID)
         self.pred = pred
         self.store_wsi_features()
@@ -196,7 +197,6 @@ class VisualizerMIL(BaseVisualizer):
         wsi_embedded_path = os.path.join(self.path_emb, 'mat_pca', wsi_ID + "_embedded.npy")
         input_wsi = self._preprocess(wsi_embedded_path, expand_bs=False)
         self.classifier(input_wsi)
- 
 
     def create_masks(self, N=500, head=0):
         """create_masks.
@@ -338,9 +338,10 @@ class VisualizerMIL(BaseVisualizer):
         if path_raw is None:
             path_raw = self.path_raw
         heatmap = self._get_heatmap()[:,:,head]
-        top, _ = self._get_topk_tiles(heatmap, k=1)
-        top_tile = self._get_image(path_raw, top)
-        return top_tile
+        top, worst = self._get_topk_tiles(heatmap, k=1)
+        top_tile, worst_tile = self._get_image(path_raw, top), self._get_image(path_raw, worst)
+        top_emb , worst_emb = self.input_wsi[int(top.item()), :], self.input_wsi[int(worst.item()),:]
+        return top_tile, worst_tile, top_emb, worst_emb
 
     def _get_topk_tiles(self, heatmap, k=4):
         infomat = self.info['infomat'].flatten()
@@ -456,12 +457,13 @@ class TileSeeker(BaseVisualizer):
     """
     Seeks for the best tile scoring tile according to one class.
     """
-    def __init__(self, model, n_best, min_prob=False):
+    def __init__(self, model, n_best, min_prob=False, max_per_slides=None):
         super(TileSeeker, self).__init__(model)
         self.attention = self.model.network.mil.attention
         self.attention.eval()
         self.n_best = n_best
         self.min_prob = min_prob
+        self.max_per_slides = max_per_slides
 
         ## Model parameters
         assert self.model.args.num_heads == 1, 'you can\'t extract a best tile when using the multiheaded attention'
@@ -471,7 +473,10 @@ class TileSeeker(BaseVisualizer):
         ## list that have to be filled with various WSI
         self.store_info = None
         self.store_score = None
+        self.store_tile = None
         self.store_images = None
+        self.store_preclassif = None
+        self.store_attention = None
         self._reset_storage()
 
     def forward(self, wsi_ID):
@@ -490,39 +495,38 @@ class TileSeeker(BaseVisualizer):
         #process each images
         x = self._preprocess(x)
         out = self.classifier(x) # (bs, n_class)
-        out = out.detach().cpu()
         logits = self.hooker.scores
 
         self.attention(x.unsqueeze(0))
         tw = self.hooker.tiles_weights.squeeze()
         _, ind = torch.sort(torch.Tensor(tw))
-        size_select = min(500, len(ind))
+        size_select = min(300, len(ind))#int(len(ind)/100)
         selection = set(ind[-size_select:].cpu().numpy())
         
         # Find attention scores to filter out of distribution tiles
 #        out = self._postprocess(out)
-        self.store_best(logits, info, selection, min_prob=self.min_prob)
+        self.store_best(x.cpu().numpy(), logits, info, selection, min_prob=self.min_prob, max_per_slides=self.max_per_slides)
         return self
 
-    def forward_all(self, test=True):
+    def forward_all(self, only_test=True):
         table = self.table
         test = int(self.model.args.test_fold)
-        wsi_ID = table[table['test'] == test]['ID'].values
+        wsi_ID = table[table['test'] == test]['ID'].values if only_test else table['ID'].values
         for o in wsi_ID:
+            print(o)
             try:
-                print(o)
                 self.forward(o)
             except:
-                continue
+                print('exception')
         return self
 
     def _postprocess(self, out):
 #        sc = StandardScaler()
 #        out = sc.fit_transform(out)
-        out = np.array(torch.nn.functional.softmax(torch.Tensor(out/100), dim=-1))
+        out = np.array(torch.nn.functional.softmax(torch.Tensor(out), dim=-1))
         return out
 
-    def store_best(self, out, info, selection, min_prob=False):
+    def store_best(self, inp, out, info, selection_att, min_prob=False, max_per_slides=None):
         """store_best.
         decides if we have to store the tile, according the final activation value.
 
@@ -534,30 +538,57 @@ class TileSeeker(BaseVisualizer):
         """
         sgn = -1 if min_prob else 1
         # for each tile
+        tmp_infostore, tmp_scorestore , tmp_tilestore, tmp_attentionstore, tmp_preclassifstore = dict(), dict(), dict(), dict(), dict()
+
+        for o,i in enumerate(self.target_correspondance):
+            tmp_scorestore[o] = []
+            tmp_infostore[o] = []
+            tmp_tilestore[o] = []
+            tmp_attentionstore[o] = []
+            tmp_preclassifstore[o] = []
+
         for s in range(out.shape[0]): 
-            if s not in selection:
+            if s not in selection_att:
                 continue
             # for each class
             for o in range(out.shape[1]):
                 # If the score for class o at tile s is bigger than the smallest 
                 # stored value: put in storage
                 if (len(self.store_score[o]) < self.n_best) or (sgn * out[s,o] >= sgn * self.store_score[o][0]):
-                    self.store_info[o].append(info['paradict'][s])
-                    self.store_score[o].append(out[s,o])
+                    tmp_infostore[o].append(info['paradict'][s])
+                    tmp_tilestore[o].append(inp[s,:])
+                    tmp_attentionstore[o].append(self.hooker.tiles_weights[s, :])
+                    tmp_preclassifstore[o].append(self.hooker.reprewsi[s, :])
+                    tmp_scorestore[o].append(out[s,o])
+
+        ## Selects the n-best tiles per WSI.
+        for o,i in enumerate(self.target_correspondance): 
+            selection = np.argsort(tmp_scorestore[o])[::-sgn][:max_per_slides] 
+            self.store_info[o] += list(np.array(tmp_infostore[o])[selection])
+            self.store_score[o] += list(np.array(tmp_scorestore[o])[selection])
+            self.store_tile[o] += list(np.array(tmp_tilestore[o])[selection])
+            self.store_attention[o] += list(np.array(tmp_attentionstore[o])[selection])
+            self.store_preclassif[o] += list(np.array(tmp_preclassifstore[o])[selection])
 
         #trie et enleve les plus bas
         # Permute storage pour que les probamax (=1) ne soient pas issues toutes
         # de la meme slide
-        self._permute_storage() 
+        #self._permute_storage() 
         for o in range(out.shape[1]):
+            print(len(tmp_preclassifstore[o]), len(tmp_infostore[o]))
             indices_best = np.argsort(self.store_score[o])[::sgn][-self.n_best:]
             self.store_score[o] = list(np.array(self.store_score[o])[indices_best])
+            self.store_tile[o] = list(np.array(self.store_tile[o])[indices_best])
             self.store_info[o] = list(np.array(self.store_info[o])[indices_best])
-                
+            self.store_attention[o] = list(np.array(self.store_attention[o])[indices_best])
+            self.store_preclassif[o] = list(np.array(self.store_preclassif[o])[indices_best])
+
+               
     def _permute_storage(self):
         for o in range(len(self.store_score)):
             permutation = np.random.permutation(np.arange(len(self.store_score[o])))
             self.store_score[o] = list(np.array(self.store_score[o])[permutation])
+            self.store_tile[o] = list(np.array(self.store_tile[o])[permutation])
             self.store_info[o] = list(np.array(self.store_info[o])[permutation])
 
     def _reset_storage(self):
@@ -571,11 +602,17 @@ class TileSeeker(BaseVisualizer):
         """
         self.store_score = dict()
         self.store_info = dict()
+        self.store_tile = dict()
         self.store_image = dict()
+        self.store_preclassif = dict()
+        self.store_attention = dict()
         for o,i in enumerate(self.target_correspondance):
             self.store_info[o] = []
             self.store_score[o] = []
+            self.store_tile[o] = []
             self.store_image[i] = []
+            self.store_preclassif[o] = []
+            self.store_attention[o] = []
 
     def extract_images(self):
         for o,i in enumerate(self.target_correspondance):
@@ -588,12 +625,6 @@ class TileSeeker(BaseVisualizer):
         return self
 
 if __name__ == '__main__':
-#    fire.Fire(TileSeeker)
-    fire.Fire(VisualizerMIL)
+    fire.Fire(TileSeeker)
+#    fire.Fire(VisualizerMIL)
     
-
-
-
-
-
-
