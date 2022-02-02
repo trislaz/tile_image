@@ -12,7 +12,8 @@ def get_arguments():
     parser.add_argument('--tiler', type=str, default='simple', help='type of tiler : imagenet | simple | simclr | moco')
     parser.add_argument('--path_outputs', type=str, help='output folder path', default='.')
     parser.add_argument('--model_path', type=str, default='.', help='if using moco, path to the trained resnet')
-    parser.add_argument('--mask_tolerance', type=float, default=0.75)
+    parser.add_argument('--mask_tolerance', type=float, default=0.8)
+    parser.add_argument('--from_0', type=int, default=0)
     args = parser.parse_args()
     args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     return args
