@@ -2,7 +2,7 @@
 import useful_wsi as usi
 from glob import glob
 from argparse import ArgumentParser
-from torchvision.models import resnet50, resnet18, resnext50_32x4d
+from torchvision.models import resnet50, resnet18, resnext50_32x4d, densenet121
 from torchvision import transforms
 from torch.nn import Identity
 import torch
@@ -131,6 +131,7 @@ class ImageTiler:
         self.size = (args.size, args.size)
         self.path_wsi = args.path_wsi 
         self.path_outputs = args.path_outputs
+        self.from_0 = args.from_0
         self.auto_mask = args.auto_mask
         self.path_mask = args.path_mask
         self.model_path = args.model_path 
@@ -176,8 +177,14 @@ class ImageTiler:
     def tile_image(self):
         self.mask_function = self._get_mask_function()
         tiler = getattr(self, self.tiler + '_tiler')
+        if self.from_0:
+            level = 0
+            patch_size = ((self.level * 2) * self.size[0], (self.level * 2)*self.size[1])
+        else:
+            level = self.level
+            patch_size = self.size
         param_tiles = usi.patch_sampling(slide=self.slide, mask_level=self.mask_level, mask_function=self.mask_function, 
-            sampling_method=self.sampling_method, n_samples=self.n_samples, analyse_level=self.level, patch_size=self.size, mask_tolerance = self.mask_tolerance)
+            sampling_method=self.sampling_method, n_samples=self.n_samples, analyse_level=level, patch_size=patch_size, mask_tolerance = self.mask_tolerance)
         if self.make_info:
             self._make_infodocs(param_tiles)
             self._make_visualisations(param_tiles)
@@ -230,27 +237,33 @@ class ImageTiler:
        else:
            return os.path.join(self.path_outputs, subfolder, name)
 
-
     def simple_tiler(self, param_tiles):
+        param_tiles = np.array(param_tiles)
+        param_tiles = param_tiles[np.random.choice(range(len(param_tiles)), min(1000,len(param_tiles)), replace=False)]
         for o, para in enumerate(param_tiles):
             patch = usi.get_image(slide=self.path_wsi, para=para, numpy=False)
+            if self.from_0:
+                patch = patch.resize(self.size)
             patch = patch.convert('RGB')
             name_wsi = os.path.splitext(os.path.basename(self.path_wsi))[0]
-            new_name =  "{}_{}.jpg".format(name_wsi, o)
+            new_name =  "{}_{}.png".format(name_wsi, o)
             new_path = self.get_new_path(new_name, 'simple')
             patch.save(new_path)
             del patch
 
     def imagenet_tiler(self, param_tiles):
-        model = resnet18(pretrained=True)
+        model = resnet50(pretrained=True)
         model.fc = Identity()
         model = model.to(self.device)
         model.eval()
         preprocess = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
         tiles = []
+        #param_tiles = np.array(param_tiles)[np.random.choice(range(len(param_tiles)), min(4000,len(param_tiles)), replace=False)]
         for o, para in enumerate(param_tiles):
             image = usi.get_image(slide=self.slide, para=para, numpy=False)
             image = image.convert("RGB")
+            if self.from_0:
+                image = image.resize(self.size)
             image = preprocess(image).unsqueeze(0)
             image = image.to(self.device)
             with torch.no_grad():
@@ -337,8 +350,13 @@ class ImageTiler:
                     transforms.Normalize([0.753, 0.584,  0.706], [0.128, 0.157, 0.122])])  
             elif self.size[0] == 224:
                 print('ok_norm')
-                trans = transforms.Compose([transforms.ToTensor(),
-                    transforms.Normalize([0.747, 0.515,  0.70], [0.145, 0.209, 0.154])])
+                #trans = transforms.Compose([transforms.ToTensor(),
+                #    transforms.Normalize([0.747, 0.515,  0.70], [0.145, 0.209, 0.154])])
+                ## trans moco equi
+                trans = transforms.Compose([transforms.ToTensor(), 
+                    transforms.Normalize([0.703, 0.475,  0.664], [0.162, 0.183, 0.140])])
+                # trans moco curie 256
+
             elif self.size[0] == 512:
                 trans = transforms.Compose([transforms.ToTensor(), 
                     transforms.Normalize([0.763, 0.602, 0.718], [0.134, 0.174, 0.131])])
@@ -348,8 +366,9 @@ class ImageTiler:
         return trans
 
     def moco_tiler(self, param_tiles):
-        #model = resnet18()
-        model = resnext50_32x4d()
+        model = resnet18()
+        #model = resnext50_32x4d()
+        #model = Equinet.Wide_ResNet()
         checkpoint = torch.load(self.model_path, map_location='cpu')
         # rename moco pre-trained keys
         state_dict = checkpoint['state_dict']
@@ -369,6 +388,8 @@ class ImageTiler:
         for o, para in enumerate(param_tiles):
             image = usi.get_image(slide=self.slide, para=para, numpy=False)
             image = image.convert("RGB")
+            if self.from_0:
+                image = image.resize(self.size)
             image = preprocess(image).unsqueeze(0)
             image = image.to(self.device)
             with torch.no_grad():
@@ -376,6 +397,44 @@ class ImageTiler:
             tiles.append(t.cpu().numpy())
         mat = np.vstack(tiles)
         np.save(os.path.join(self.path_outputs, '{}_embedded.npy'.format(self.name_wsi)), mat)
+        to_write = np.array(param_tiles)[np.random.choice(range(len(param_tiles)), min(5,len(param_tiles)), replace=False)]
+        self.simple_tiler(to_write)
+
+    def ciga_tiler(self, param_tiles):
+        def load_model_weights(model, weights):
+            model_dict = model.state_dict()
+            weights = {k: v for k, v in weights.items() if k in model_dict}
+            if weights == {}:
+                print('No weight could be loaded..')
+            model_dict.update(weights)
+            model.load_state_dict(model_dict)
+            return model
+        model = resnet18()
+        state = torch.load(self.model_path, map_location='cpu')
+        state_dict = state['state_dict']
+        for key in list(state_dict.keys()):
+            state_dict[key.replace('model.', '').replace('resnet.', '')] = state_dict.pop(key)
+        model = load_model_weights(model, state_dict)
+        model.fc = Identity()
+        model = model.to(self.device)
+        model.eval()
+        preprocess = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])])
+        tiles = []
+        #param_tiles = np.array(param_tiles)[np.random.choice(range(len(param_tiles)), min(4000,len(param_tiles)), replace=False)]
+        for o, para in enumerate(param_tiles):
+            image = usi.get_image(slide=self.slide, para=para, numpy=False)
+            image = image.convert("RGB")
+            if self.from_0:
+                image = image.resize(self.size)
+            image = preprocess(image).unsqueeze(0)
+            image = image.to(self.device)
+            with torch.no_grad():
+                t = model(image).squeeze()
+            tiles.append(t.cpu().numpy())
+        mat = np.vstack(tiles)
+        np.save(os.path.join(self.path_outputs, '{}_embedded.npy'.format(self.name_wsi)), mat)
+
+
 
     def imagenet_v2_tiler(self, param_tiles):
         """Same as imagenet tiler, but save all the tiles in a different file
